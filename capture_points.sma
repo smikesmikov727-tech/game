@@ -155,6 +155,9 @@ PrecacheSafeSpawnPositions()
 {
     server_print("[CP] Кэширование позиций спавна...")
 
+    new totalPositions = 0
+    new badPoints = 0
+
     for(new pt = 0; pt < g_Num; pt++)
     {
         g_SafeSpawnCount[pt] = 0
@@ -205,8 +208,26 @@ PrecacheSafeSpawnPositions()
             }
         }
 
-        server_print("[CP] Точка #%d: %d позиций", pt + 1, g_SafeSpawnCount[pt])
+        totalPositions += g_SafeSpawnCount[pt]
+
+        if(g_SafeSpawnCount[pt] < 5)
+        {
+            server_print("[CP] WARNING! Точка #%d: только %d позиций (мало!)", pt + 1, g_SafeSpawnCount[pt])
+            badPoints++
+        }
+        else
+        {
+            server_print("[CP] Точка #%d: %d позиций OK", pt + 1, g_SafeSpawnCount[pt])
+        }
     }
+
+    server_print("[CP] ========================================")
+    server_print("[CP] ИТОГО: %d безопасных позиций на %d точках", totalPositions, g_Num)
+    if(badPoints > 0)
+        server_print("[CP] WARNING: %d точек с малым кол-вом позиций!", badPoints)
+    else
+        server_print("[CP] Все точки имеют достаточно позиций для спавна")
+    server_print("[CP] ========================================")
 }
 
 bool:IsPositionSafeForSpawn(Float:pos[3], pt)
