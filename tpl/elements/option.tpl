@@ -1,0 +1,1 @@
+<option value="{value}" {if("{selected}" == "1")} selected {/if}>{title}</option>
