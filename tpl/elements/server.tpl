@@ -2,66 +2,88 @@
 
 {if($monitoringType == 0)}
 	<div class="server">
-		<h3>
-			{if('{rcon}' == '1' && count($commands) > 0 && is_auth() && is_worthy_specifically("v", {id}))}
-				<span data-toggle="modal" data-target="#server-management-modal{id}">
-					⚙️
-				</span>
+		<div class="server-header">
+			<div class="server-status online"></div>
+			<h3>
+				{if('{rcon}' == '1' && count($commands) > 0 && is_auth() && is_worthy_specifically("v", {id}))}
+					<span class="server-settings" data-toggle="modal" data-target="#server-management-modal{id}">
+						<i class="fas fa-cog"></i>
+					</span>
 
-				<div class="modal fade" id="server-management-modal{id}">
-					<div class="modal-dialog modal-lg">
-						<div class="modal-content">
-							<div class="modal-header">
-								<h4 class="modal-title">Управление сервером</h4>
-								<button type="button" class="close" data-dismiss="modal" aria-label="Close">
-									<span aria-hidden="true">&times;</span>
-								</button>
-							</div>
-							<div class="modal-body">
-								<div class="input-group input-group-sm">
-									<div class="input-group-prepend">
-										<button
-												class="btn btn-outline-primary"
-												type="button"
-												onclick='doRconCommandOnServer(
-														$("#server-management-command-id{id}").val(),
-														$("#server-management-command-id{id} option:selected").attr("data-command-params"),
-														{id}
-												);'
-										>
-											Выполнить
-										</button>
-									</div>
-									<select id="server-management-command-id{id}" class="form-control">
-										{for($l = 0; $l < count($commands); $l++)}
-											<option value="{{$commands[$l]->id}}" data-command-params='{{$commands[$l]->params}}'>
-												{{$commands[$l]->title}}
-											</option>
-										{/for}
-									</select>
+					<div class="modal fade" id="server-management-modal{id}">
+						<div class="modal-dialog modal-lg">
+							<div class="modal-content">
+								<div class="modal-header">
+									<h4 class="modal-title"><i class="fas fa-server"></i> Управление сервером</h4>
+									<button type="button" class="close" data-dismiss="modal" aria-label="Close">
+										<span aria-hidden="true">&times;</span>
+									</button>
 								</div>
+								<div class="modal-body">
+									<div class="input-group input-group-sm">
+										<div class="input-group-prepend">
+											<button
+													class="btn btn-primary"
+													type="button"
+													onclick='doRconCommandOnServer(
+															$("#server-management-command-id{id}").val(),
+															$("#server-management-command-id{id} option:selected").attr("data-command-params"),
+															{id}
+													);'
+											>
+												<i class="fas fa-play"></i> Выполнить
+											</button>
+										</div>
+										<select id="server-management-command-id{id}" class="form-control">
+											{for($l = 0; $l < count($commands); $l++)}
+												<option value="{{$commands[$l]->id}}" data-command-params='{{$commands[$l]->params}}'>
+													{{$commands[$l]->title}}
+												</option>
+											{/for}
+										</select>
+									</div>
 
-								<pre class="mt-3" id="server-management-command-sending-result{id}" style="display: none"></pre>
+									<pre class="mt-3" id="server-management-command-sending-result{id}" style="display: none"></pre>
+								</div>
 							</div>
 						</div>
 					</div>
-				</div>
-			{/if}
-			️
-			{name}
-		</h3>
+				{/if}
+				{name}
+			</h3>
+		</div>
 
 		<div class="map-image" style="background: url({map_img});"></div>
 
-		<p>Карта: {map_name}</p>
-		<p onclick="get_players({id});" data-toggle="modal" data-target="#server-players-modal{id}">Игроков: {now}/{max}</p>
-		<p><a href="steam://connect/{address}" title="Подключиться к серверу">{address}</a></p>
+		<div class="server-info">
+			<p class="server-map">
+				<i class="fas fa-map"></i>
+				<span>{map_name}</span>
+			</p>
+			<p class="server-players" onclick="get_players({id});" data-toggle="modal" data-target="#server-players-modal{id}">
+				<i class="fas fa-users"></i>
+				<span>{now}/{max}</span>
+				<span class="players-bar">
+					<span class="players-fill" style="width: {percentage}%"></span>
+				</span>
+			</p>
+			<p class="server-connect">
+				<i class="fas fa-plug"></i>
+				<a href="steam://connect/{address}" title="Подключиться к серверу">{address}</a>
+			</p>
+		</div>
+
+		<div class="server-actions">
+			<a href="steam://connect/{address}" class="btn btn-primary btn-sm">
+				<i class="fas fa-gamepad"></i> Играть
+			</a>
+		</div>
 
 		<div class="modal fade" id="server-players-modal{id}">
 			<div class="modal-dialog modal-lg">
 				<div class="modal-content">
 					<div class="modal-header">
-						<h4 class="modal-title">Игроки</h4>
+						<h4 class="modal-title"><i class="fas fa-users"></i> Игроки на сервере</h4>
 						<button type="button" class="close" data-dismiss="modal" aria-label="Close">
 							<span aria-hidden="true">&times;</span>
 						</button>
@@ -71,12 +93,12 @@
 							<table class="table table-bordered">
 								<thead>
 									<tr>
-										<td>#</td>
-										<td>Ник</td>
-										<td>Убийств</td>
-										<td>Время</td>
+										<th>#</th>
+										<th>Ник</th>
+										<th>Убийств</th>
+										<th>Время</th>
 										{if('{rcon}' == '1' && is_auth() && is_worthy_specifically("s", {id}))}
-											<td>Действие</td>
+											<th>Действие</th>
 										{/if}
 									</tr>
 								</thead>
@@ -107,7 +129,7 @@
 
 			{if('{rcon}' == '1' && count($commands) > 0 && is_auth() && is_worthy_specifically("v", {id}))}
 				<span data-toggle="modal" data-target="#server-management-modal{id}">
-					⚙️
+					<i class="fas fa-cog"></i>
 				</span>
 
 				<div class="modal fade" id="server-management-modal{id}">
@@ -193,12 +215,12 @@
 								<table class="table table-bordered">
 									<thead>
 									<tr>
-										<td>#</td>
-										<td>Ник</td>
-										<td>Убийств</td>
-										<td>Время</td>
+										<th>#</th>
+										<th>Ник</th>
+										<th>Убийств</th>
+										<th>Время</th>
 										{if('{rcon}' == '1' && isset($_SESSION['id']) && is_worthy_specifically("s", {id}))}
-											<td>Действие</td>
+											<th>Действие</th>
 										{/if}
 									</tr>
 									</thead>

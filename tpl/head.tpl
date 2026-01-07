@@ -2,8 +2,8 @@
 		<meta charset="utf-8">
 		<title>{title}</title>
 
-		<!-- Google Fonts for Cyber Theme -->
-		{if($theme == 3)}
+		<!-- Google Fonts for Cyber/Modern Theme -->
+		{if($theme == 3 || $theme == 4)}
 		<link rel="preconnect" href="https://fonts.googleapis.com">
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 		<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -19,6 +19,9 @@
         {/if}
         {if($theme == 3)}
 			<link rel="stylesheet" href="{site_host}templates/{template}/css/theme_cyber.css?v={cache}">
+        {/if}
+        {if($theme == 4)}
+			<link rel="stylesheet" href="{site_host}templates/{template}/css/theme_modern.css?v={cache}">
         {/if}
 
 		<link rel="shortcut icon" href="{site_host}templates/{template}/img/favicon.ico?v={cache}">
