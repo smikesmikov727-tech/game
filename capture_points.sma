@@ -559,35 +559,59 @@ public OnSpawn(id)
 SpawnMode_Smart(id, TeamName:tm)
 {
     new my = (tm == TEAM_CT) ? 2 : 1
+    new name[32]
+    get_user_name(id, name, charsmax(name))
+
+    server_print("[CP] SpawnMode_Smart: %s (team %d, my=%d)", name, _:tm, my)
 
     new teamPoints[MAX_POINTS], teamPointCount = 0
     for(new i = 0; i < g_Num; i++)
     {
         if(g_State[i] == my && g_SafeSpawnCount[i] > 0)
+        {
             teamPoints[teamPointCount++] = i
+            server_print("[CP]   - Point #%d owned by team (state=%d)", i+1, g_State[i])
+        }
     }
+
+    server_print("[CP]   Team points count: %d", teamPointCount)
 
     new Float:spawnPos[3]
 
     new lastCap = g_LastCapturedPoint[id]
+    server_print("[CP]   LastCapturedPoint: %d", lastCap)
+
     if(lastCap >= 0 && lastCap < g_Num && g_State[lastCap] == my)
     {
+        server_print("[CP]   Trying last captured point #%d", lastCap+1)
         if(FindFreeSpawnPosition(id, lastCap, spawnPos))
         {
             set_entvar(id, var_origin, spawnPos)
             g_SpawnCountOnPoint[lastCap]++
+            server_print("[CP]   SUCCESS: Spawned at last captured point #%d", lastCap+1)
             return
         }
+        server_print("[CP]   FAILED: No free position at last captured point")
     }
 
     if(teamPointCount > 0)
     {
         new pt = teamPoints[random(teamPointCount)]
+        server_print("[CP]   Trying random team point #%d", pt+1)
         if(FindFreeSpawnPosition(id, pt, spawnPos))
         {
             set_entvar(id, var_origin, spawnPos)
             g_SpawnCountOnPoint[pt]++
+            server_print("[CP]   SUCCESS: Spawned at point #%d", pt+1)
         }
+        else
+        {
+            server_print("[CP]   FAILED: No free position, spawning at base")
+        }
+    }
+    else
+    {
+        server_print("[CP]   No team points, spawning at base")
     }
 }
 
