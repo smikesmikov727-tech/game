@@ -541,17 +541,6 @@ SayTeam(TeamName:team, const msg[], any:...)
     }
 }
 
-SayOne(id, const msg[], any:...)
-{
-    new buf[192]
-    vformat(buf, charsmax(buf), msg, 3)
-
-    message_begin(MSG_ONE, g_MsgSay, _, id)
-    write_byte(id)
-    write_string(buf)
-    message_end()
-}
-
 public OnTouch(ent, id)
 {
     if(!is_user_connected(id) || !is_user_alive(id)) return
