@@ -137,7 +137,7 @@ PrecacheSafeSpawnPositions()
                 new Float:spawnPos[3]
                 spawnPos[0] = hitPos[0]
                 spawnPos[1] = hitPos[1]
-                spawnPos[2] = hitPos[2] + 36.0
+                spawnPos[2] = hitPos[2] + 40.0
                 if(IsPositionSafeForSpawn(spawnPos, pt))
                 {
                     g_SafeSpawns[pt][g_SafeSpawnCount[pt]][0] = spawnPos[0]
@@ -641,6 +641,26 @@ bool:FindFreeSpawnPosition(id, pt, Float:outPos[3])
         pos[0] = g_SafeSpawns[pt][idx][0]
         pos[1] = g_SafeSpawns[pt][idx][1]
         pos[2] = g_SafeSpawns[pt][idx][2]
+
+        // Трассировка вниз чтобы найти реальную землю
+        new Float:start[3], Float:end[3]
+        start[0] = pos[0]
+        start[1] = pos[1]
+        start[2] = pos[2] + 100.0
+        end[0] = pos[0]
+        end[1] = pos[1]
+        end[2] = pos[2] - 100.0
+
+        engfunc(EngFunc_TraceLine, start, end, IGNORE_MONSTERS, id, 0)
+        new Float:frac
+        get_tr2(0, TR_flFraction, frac)
+
+        if(frac < 1.0)
+        {
+            new Float:hitPos[3]
+            get_tr2(0, TR_vecEndPos, hitPos)
+            pos[2] = hitPos[2] + 37.0  // Высота игрока от земли
+        }
 
         engfunc(EngFunc_TraceHull, pos, pos, DONT_IGNORE_MONSTERS, HULL_HUMAN, id)
         if(!get_tr2(0, TR_StartSolid) && !get_tr2(0, TR_AllSolid))
