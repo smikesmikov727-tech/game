@@ -37,6 +37,7 @@ new pCvarPointsCount, pCvarCapTime, pCvarReward
 new pCvarMinDist, pCvarBaseDist, pCvarCapRadius
 new pCvarSpawnOnPoints, pCvarShowHud, pCvarSound, pCvarEffect, pCvarRecapBonus
 new pCvarSpawnMode  // Режим спавна
+new pCvarNeutralChance  // Шанс спавна у нейтральной точки
 
 // Точки захвата
 new g_Ent[MAX_POINTS]
@@ -99,6 +100,10 @@ public plugin_init()
     // 2 = умный спавн (место смерти → точки → база)
     // 3 = стратегический (распределение по фронту)
     pCvarSpawnMode = register_cvar("cp_spawn_mode", "2")
+
+    // Шанс спавна рядом с нейтральной точкой (0-100%)
+    // Работает в режимах 2 и 3
+    pCvarNeutralChance = register_cvar("cp_neutral_spawn_chance", "25")
 
     RegisterHookChain(RG_CBasePlayer_Spawn, "OnSpawn", true)
     RegisterHookChain(RG_CBasePlayer_Killed, "OnDeath", false)
@@ -851,7 +856,7 @@ SpawnMode_Random(id, TeamName:tm)
     }
 }
 
-// Режим 2: Умный спавн (место смерти → последняя захваченная → точки → база)
+// Режим 2: Умный спавн (место смерти → нейтральные → последняя захваченная → точки → база)
 SpawnMode_Smart(id, TeamName:tm)
 {
     new my = (tm == TEAM_CT) ? 2 : 1
@@ -864,7 +869,13 @@ SpawnMode_Smart(id, TeamName:tm)
             teamPoints[teamPointCount++] = i
     }
 
-    if(teamPointCount == 0) return
+    // Собираем нейтральные точки
+    new neutralPoints[MAX_POINTS], neutralCount = 0
+    for(new i = 0; i < g_Num; i++)
+    {
+        if(g_State[i] == 0 && g_SafeSpawnCount[i] > 0)
+            neutralPoints[neutralCount++] = i
+    }
 
     new Float:spawnPos[3]
 
@@ -881,7 +892,25 @@ SpawnMode_Smart(id, TeamName:tm)
         }
     }
 
-    // Приоритет 2: Последняя захваченная игроком точка
+    // Приоритет 2: Шанс спавна у НЕЙТРАЛЬНОЙ точки (для захвата)
+    if(neutralCount > 0)
+    {
+        new neutralChance = get_pcvar_num(pCvarNeutralChance)
+        if(random(100) < neutralChance)
+        {
+            // Выбираем нейтральную точку ближе к нашей базе (безопаснее)
+            new bestNeutral = FindNeutralNearBase(neutralPoints, neutralCount, tm)
+
+            if(bestNeutral != -1 && FindFreeSpawnPosition(id, bestNeutral, spawnPos))
+            {
+                set_entvar(id, var_origin, spawnPos)
+                g_SpawnCountOnPoint[bestNeutral]++
+                return
+            }
+        }
+    }
+
+    // Приоритет 3: Последняя захваченная игроком точка
     new lastCap = g_LastCapturedPoint[id]
     if(lastCap >= 0 && lastCap < g_Num && g_State[lastCap] == my)
     {
@@ -893,13 +922,16 @@ SpawnMode_Smart(id, TeamName:tm)
         }
     }
 
-    // Приоритет 3: Распределение по точкам с балансировкой
-    new selectedPoint = SelectLeastPopulatedPoint(teamPoints, teamPointCount)
-
-    if(selectedPoint != -1 && FindFreeSpawnPosition(id, selectedPoint, spawnPos))
+    // Приоритет 4: Распределение по точкам с балансировкой
+    if(teamPointCount > 0)
     {
-        set_entvar(id, var_origin, spawnPos)
-        g_SpawnCountOnPoint[selectedPoint]++
+        new selectedPoint = SelectLeastPopulatedPoint(teamPoints, teamPointCount)
+
+        if(selectedPoint != -1 && FindFreeSpawnPosition(id, selectedPoint, spawnPos))
+        {
+            set_entvar(id, var_origin, spawnPos)
+            g_SpawnCountOnPoint[selectedPoint]++
+        }
     }
 }
 
@@ -1024,6 +1056,49 @@ FindFrontlinePoint(teamPoints[], teamPointCount, enemyTeam)
         new Float:dx = g_PosX[pt] - enemyCenterX
         new Float:dy = g_PosY[pt] - enemyCenterY
         new Float:dist = floatsqroot(dx*dx + dy*dy)
+
+        if(dist < bestDist)
+        {
+            bestDist = dist
+            bestPoint = pt
+        }
+    }
+
+    return bestPoint
+}
+
+// Найти нейтральную точку ближе к своей базе (для безопасного захвата)
+FindNeutralNearBase(neutralPoints[], neutralCount, TeamName:tm)
+{
+    if(neutralCount == 0) return -1
+    if(neutralCount == 1) return neutralPoints[0]
+
+    // Определяем позицию нашей базы
+    new Float:baseX, Float:baseY
+    if(tm == TEAM_CT)
+    {
+        baseX = g_CTBaseX
+        baseY = g_CTBaseY
+    }
+    else
+    {
+        baseX = g_TBaseX
+        baseY = g_TBaseY
+    }
+
+    // Ищем нейтральную точку ближайшую к нашей базе
+    new bestPoint = neutralPoints[0]
+    new Float:bestDist = 999999.0
+
+    for(new i = 0; i < neutralCount; i++)
+    {
+        new pt = neutralPoints[i]
+        new Float:dx = g_PosX[pt] - baseX
+        new Float:dy = g_PosY[pt] - baseY
+        new Float:dist = floatsqroot(dx*dx + dy*dy)
+
+        // Учитываем сколько уже спавнилось на этой точке (меньше = лучше)
+        dist += float(g_SpawnCountOnPoint[pt]) * 100.0
 
         if(dist < bestDist)
         {
