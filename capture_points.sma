@@ -80,7 +80,7 @@ public plugin_precache()
 
 public plugin_init()
 {
-    register_plugin("Capture Points", "22", "AI")
+    register_plugin("Capture Points", "22-debug", "AI")
 
     pCvarPointsCount = register_cvar("cp_points_count", "7")
     pCvarCapTime = register_cvar("cp_capture_time", "8")
@@ -877,13 +877,18 @@ SpawnMode_Smart(id, TeamName:tm)
 {
     new my = (tm == TEAM_CT) ? 2 : 1
 
+    server_print("[CP DEBUG] SpawnMode_Smart: player=%d team=%d", id, my)
+
     // Собираем точки команды
     new teamPoints[MAX_POINTS], teamPointCount = 0
     for(new i = 0; i < g_Num; i++)
     {
+        server_print("[CP DEBUG] Point #%d: state=%d safeSpawns=%d (need state=%d)", i+1, g_State[i], g_SafeSpawnCount[i], my)
         if(g_State[i] == my && g_SafeSpawnCount[i] > 0)
             teamPoints[teamPointCount++] = i
     }
+
+    server_print("[CP DEBUG] teamPointCount=%d", teamPointCount)
 
     // Собираем нейтральные точки
     new neutralPoints[MAX_POINTS], neutralCount = 0
@@ -893,17 +898,22 @@ SpawnMode_Smart(id, TeamName:tm)
             neutralPoints[neutralCount++] = i
     }
 
+    server_print("[CP DEBUG] neutralCount=%d", neutralCount)
+
     new Float:spawnPos[3]
 
     // Приоритет 1: Спавн рядом с местом смерти (если есть своя точка рядом)
     if(g_HasDeathPos[id])
     {
+        server_print("[CP DEBUG] Priority 1: Has death pos")
         new nearestPoint = FindNearestTeamPoint(g_DeathPos[id], my, DEATH_SPAWN_RADIUS)
+        server_print("[CP DEBUG] nearestPoint=%d", nearestPoint)
         if(nearestPoint != -1 && FindFreeSpawnPosition(id, nearestPoint, spawnPos))
         {
             set_entvar(id, var_origin, spawnPos)
             g_SpawnCountOnPoint[nearestPoint]++
             g_HasDeathPos[id] = false
+            server_print("[CP DEBUG] SPAWNED on death point #%d", nearestPoint+1)
             return
         }
     }
@@ -912,7 +922,9 @@ SpawnMode_Smart(id, TeamName:tm)
     if(neutralCount > 0)
     {
         new neutralChance = get_pcvar_num(pCvarNeutralChance)
-        if(random(100) < neutralChance)
+        new roll = random(100)
+        server_print("[CP DEBUG] Priority 2: neutral roll=%d chance=%d", roll, neutralChance)
+        if(roll < neutralChance)
         {
             // Выбираем нейтральную точку ближе к нашей базе (безопаснее)
             new bestNeutral = FindNeutralNearBase(neutralPoints, neutralCount, tm)
@@ -921,6 +933,7 @@ SpawnMode_Smart(id, TeamName:tm)
             {
                 set_entvar(id, var_origin, spawnPos)
                 g_SpawnCountOnPoint[bestNeutral]++
+                server_print("[CP DEBUG] SPAWNED on neutral point #%d", bestNeutral+1)
                 return
             }
         }
@@ -928,13 +941,23 @@ SpawnMode_Smart(id, TeamName:tm)
 
     // Приоритет 3: Последняя захваченная игроком точка
     new lastCap = g_LastCapturedPoint[id]
+    server_print("[CP DEBUG] Priority 3: lastCap=%d g_Num=%d", lastCap, g_Num)
+    if(lastCap >= 0 && lastCap < g_Num)
+    {
+        server_print("[CP DEBUG] lastCap state=%d (need=%d) safeSpawns=%d", g_State[lastCap], my, g_SafeSpawnCount[lastCap])
+    }
     if(lastCap >= 0 && lastCap < g_Num && g_State[lastCap] == my)
     {
         if(FindFreeSpawnPosition(id, lastCap, spawnPos))
         {
             set_entvar(id, var_origin, spawnPos)
             g_SpawnCountOnPoint[lastCap]++
+            server_print("[CP DEBUG] SPAWNED on last captured point #%d", lastCap+1)
             return
+        }
+        else
+        {
+            server_print("[CP DEBUG] FindFreeSpawnPosition FAILED for lastCap #%d", lastCap+1)
         }
     }
 
@@ -942,13 +965,22 @@ SpawnMode_Smart(id, TeamName:tm)
     if(teamPointCount > 0)
     {
         new selectedPoint = SelectLeastPopulatedPoint(teamPoints, teamPointCount)
+        server_print("[CP DEBUG] Priority 4: selectedPoint=%d", selectedPoint)
 
         if(selectedPoint != -1 && FindFreeSpawnPosition(id, selectedPoint, spawnPos))
         {
             set_entvar(id, var_origin, spawnPos)
             g_SpawnCountOnPoint[selectedPoint]++
+            server_print("[CP DEBUG] SPAWNED on least populated point #%d", selectedPoint+1)
+            return
+        }
+        else
+        {
+            server_print("[CP DEBUG] FindFreeSpawnPosition FAILED for selectedPoint")
         }
     }
+
+    server_print("[CP DEBUG] NO SPAWN LOCATION FOUND - spawning at base")
 }
 
 // Режим 3: Стратегический (распределение по линии фронта)
@@ -1155,8 +1187,12 @@ SelectLeastPopulatedPoint(teamPoints[], teamPointCount)
 // Поиск свободной позиции
 bool:FindFreeSpawnPosition(id, pt, Float:outPos[3])
 {
+    server_print("[CP DEBUG] FindFreeSpawnPosition: pt=%d safeSpawnCount=%d", pt, g_SafeSpawnCount[pt])
     if(g_SafeSpawnCount[pt] == 0)
+    {
+        server_print("[CP DEBUG] FindFreeSpawnPosition: NO SAFE POSITIONS for point #%d", pt+1)
         return false
+    }
 
     // Перемешиваем порядок
     new order[MAX_SPAWN_POSITIONS]
