@@ -1111,20 +1111,15 @@ SelectLeastPopulatedPoint(teamPoints[], teamPointCount)
     if(teamPointCount == 0) return -1
     if(teamPointCount == 1) return teamPoints[0]
 
-    new bestPoint = teamPoints[0]
+    // Находим минимальное количество спавнов
     new bestCount = g_SpawnCountOnPoint[teamPoints[0]]
-
     for(new i = 1; i < teamPointCount; i++)
     {
-        new pt = teamPoints[i]
-        if(g_SpawnCountOnPoint[pt] < bestCount)
-        {
-            bestCount = g_SpawnCountOnPoint[pt]
-            bestPoint = pt
-        }
+        if(g_SpawnCountOnPoint[teamPoints[i]] < bestCount)
+            bestCount = g_SpawnCountOnPoint[teamPoints[i]]
     }
 
-    // Если несколько точек с одинаковым счётом - выбираем случайную из них
+    // Собираем все точки с минимальным счётом
     new candidates[MAX_POINTS], candCount = 0
     for(new i = 0; i < teamPointCount; i++)
     {
@@ -1132,6 +1127,7 @@ SelectLeastPopulatedPoint(teamPoints[], teamPointCount)
             candidates[candCount++] = teamPoints[i]
     }
 
+    // Выбираем случайную из них
     return candidates[random(candCount)]
 }
 
