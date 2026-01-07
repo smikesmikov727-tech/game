@@ -7,10 +7,7 @@
 
 #define MAX_POINTS 16
 #define MAX_SPAWN_POSITIONS 64
-#define MIN_WALL_DISTANCE 48.0
-#define MIN_PLAYER_DISTANCE 80.0
 #define POINT_MODEL_RADIUS 40.0
-#define DEATH_SPAWN_RADIUS 500.0  // Радиус поиска точки рядом с местом смерти
 
 #if !defined MAX_CLIENTS
     #define MAX_CLIENTS 32
@@ -22,35 +19,28 @@ new const MODELS[][] = {
     "models/player/urban/urban.mdl"
 }
 
-// Квары
 new pCvarPointsCount, pCvarCapTime, pCvarReward
 new pCvarMinDist, pCvarBaseDist, pCvarCapRadius
-new pCvarSpawnOnPoints, pCvarShowHud, pCvarSound, pCvarEffect, pCvarRecapBonus
-new pCvarSpawnMode  // Режим спавна
-new pCvarNeutralChance  // Шанс спавна у нейтральной точки
+new pCvarSpawnOnPoints, pCvarShowHud, pCvarSound, pCvarRecapBonus
+new pCvarSpawnMode
 
-// Точки захвата
 new g_Ent[MAX_POINTS]
 new Float:g_PosX[MAX_POINTS], Float:g_PosY[MAX_POINTS], Float:g_PosZ[MAX_POINTS]
-new g_State[MAX_POINTS]  // 0 = нейтрально, 1 = T, 2 = CT
+new g_State[MAX_POINTS]
 new g_Num
 
-// Захват
 new Float:g_CapEnd[33]
 new bool:g_Capturing[33]
 new g_CapEnt[33]
 
-// Система спавна
 new Float:g_SafeSpawns[MAX_POINTS][MAX_SPAWN_POSITIONS][3]
 new g_SafeSpawnCount[MAX_POINTS]
 new g_SpawnCountOnPoint[MAX_POINTS]
 
-// Место смерти игрока
 new Float:g_DeathPos[33][3]
 new bool:g_HasDeathPos[33]
-new g_LastCapturedPoint[33]  // Последняя захваченная точка игроком
+new g_LastCapturedPoint[33]
 
-// Границы карты
 new Float:g_MinX, Float:g_MaxX
 new Float:g_MinY, Float:g_MaxY
 new Float:g_MinZ, Float:g_MaxZ
@@ -58,19 +48,18 @@ new Float:g_MinZ, Float:g_MaxZ
 new Float:g_TBaseX, Float:g_TBaseY
 new Float:g_CTBaseX, Float:g_CTBaseY
 
-new g_Spr, g_MsgSay
+new g_MsgSay
 
 public plugin_precache()
 {
     for(new i = 0; i < sizeof(MODELS); i++)
         precache_model(MODELS[i])
-    g_Spr = precache_model("sprites/shockwave.spr")
     precache_sound("buttons/bell1.wav")
 }
 
 public plugin_init()
 {
-    register_plugin("Capture Points", "22-debug", "AI")
+    register_plugin("Capture Points", "23", "AI")
 
     pCvarPointsCount = register_cvar("cp_points_count", "7")
     pCvarCapTime = register_cvar("cp_capture_time", "8")
@@ -81,19 +70,8 @@ public plugin_init()
     pCvarSpawnOnPoints = register_cvar("cp_spawn_on_points", "1")
     pCvarShowHud = register_cvar("cp_show_hud", "1")
     pCvarSound = register_cvar("cp_capture_sound", "1")
-    pCvarEffect = register_cvar("cp_capture_effect", "1")
     pCvarRecapBonus = register_cvar("cp_recapture_bonus", "700")
-
-    // Режим спавна:
-    // 0 = только база
-    // 1 = база + точки (случайно)
-    // 2 = умный спавн (место смерти → точки → база)
-    // 3 = стратегический (распределение по фронту)
     pCvarSpawnMode = register_cvar("cp_spawn_mode", "2")
-
-    // Шанс спавна рядом с нейтральной точкой (0-100%)
-    // Работает в режимах 2 и 3
-    pCvarNeutralChance = register_cvar("cp_neutral_spawn_chance", "25")
 
     RegisterHookChain(RG_CBasePlayer_Spawn, "OnSpawn", true)
     RegisterHookChain(RG_CBasePlayer_Killed, "OnDeath", false)
@@ -109,62 +87,40 @@ public plugin_init()
     set_task(3.0, "InitPoints")
 }
 
-// Сохраняем место смерти
 public OnDeath(victim, attacker)
 {
     if(!is_user_connected(victim))
         return
-
     get_entvar(victim, var_origin, g_DeathPos[victim])
     g_HasDeathPos[victim] = true
 }
 
 public InitPoints()
 {
-    server_print("[CP] === Capture Points v22 ===")
-    server_print("[CP] Точек: %d", get_pcvar_num(pCvarPointsCount))
-    server_print("[CP] Режим спавна: %d", get_pcvar_num(pCvarSpawnMode))
-    server_print("[CP] ===========================")
-
+    server_print("[CP] === Capture Points v23 ===")
+    server_print("[CP] Spawn mode: %d", get_pcvar_num(pCvarSpawnMode))
     FindMapBounds()
     CreateRandomPoints()
-
     if(g_Num > 0)
     {
-        server_print("[CP] Создано точек: %d", g_Num)
+        server_print("[CP] Points: %d", g_Num)
         PrecacheSafeSpawnPositions()
         set_task(2.0, "Announce")
-    }
-    else
-    {
-        server_print("[CP] ОШИБКА: Точки не созданы!")
     }
 }
 
 PrecacheSafeSpawnPositions()
 {
-    server_print("[CP] Кэширование позиций спавна...")
-
-    new totalPositions = 0
-    new badPoints = 0
-
     for(new pt = 0; pt < g_Num; pt++)
     {
         g_SafeSpawnCount[pt] = 0
-
-        new Float:startRadius = POINT_MODEL_RADIUS + 60.0
-        new Float:maxRadius = 350.0
-        new Float:radiusStep = 40.0
-        new Float:angleStep = 30.0
-
-        for(new Float:radius = startRadius; radius <= maxRadius && g_SafeSpawnCount[pt] < MAX_SPAWN_POSITIONS; radius += radiusStep)
+        for(new Float:radius = 100.0; radius <= 350.0 && g_SafeSpawnCount[pt] < MAX_SPAWN_POSITIONS; radius += 40.0)
         {
-            for(new Float:angle = 0.0; angle < 360.0 && g_SafeSpawnCount[pt] < MAX_SPAWN_POSITIONS; angle += angleStep)
+            for(new Float:angle = 0.0; angle < 360.0 && g_SafeSpawnCount[pt] < MAX_SPAWN_POSITIONS; angle += 30.0)
             {
                 new Float:rad = angle * 3.14159 / 180.0
                 new Float:testX = g_PosX[pt] + floatcos(rad) * radius
                 new Float:testY = g_PosY[pt] + floatsin(rad) * radius
-
                 new Float:start[3], Float:end[3]
                 start[0] = testX
                 start[1] = testY
@@ -172,22 +128,16 @@ PrecacheSafeSpawnPositions()
                 end[0] = testX
                 end[1] = testY
                 end[2] = g_PosZ[pt] - 200.0
-
                 engfunc(EngFunc_TraceLine, start, end, IGNORE_MONSTERS, 0, 0)
-
                 new Float:frac
                 get_tr2(0, TR_flFraction, frac)
-
                 if(frac >= 1.0) continue
-
                 new Float:hitPos[3]
                 get_tr2(0, TR_vecEndPos, hitPos)
-
                 new Float:spawnPos[3]
                 spawnPos[0] = hitPos[0]
                 spawnPos[1] = hitPos[1]
                 spawnPos[2] = hitPos[2] + 36.0
-
                 if(IsPositionSafeForSpawn(spawnPos, pt))
                 {
                     g_SafeSpawns[pt][g_SafeSpawnCount[pt]][0] = spawnPos[0]
@@ -197,121 +147,27 @@ PrecacheSafeSpawnPositions()
                 }
             }
         }
-
-        totalPositions += g_SafeSpawnCount[pt]
-
-        if(g_SafeSpawnCount[pt] < 5)
-        {
-            server_print("[CP] WARNING! Точка #%d: только %d позиций (мало!)", pt + 1, g_SafeSpawnCount[pt])
-            badPoints++
-        }
-        else
-        {
-            server_print("[CP] Точка #%d: %d позиций OK", pt + 1, g_SafeSpawnCount[pt])
-        }
+        server_print("[CP] Point #%d: %d positions", pt+1, g_SafeSpawnCount[pt])
     }
-
-    server_print("[CP] ========================================")
-    server_print("[CP] ИТОГО: %d безопасных позиций на %d точках", totalPositions, g_Num)
-    if(badPoints > 0)
-        server_print("[CP] WARNING: %d точек с малым кол-вом позиций!", badPoints)
-    else
-        server_print("[CP] Все точки имеют достаточно позиций для спавна")
-    server_print("[CP] ========================================")
 }
 
 bool:IsPositionSafeForSpawn(Float:pos[3], pt)
 {
     engfunc(EngFunc_TraceHull, pos, pos, IGNORE_MONSTERS, HULL_HUMAN, 0)
-
     if(get_tr2(0, TR_StartSolid) || get_tr2(0, TR_AllSolid))
         return false
-
     new Float:dx = pos[0] - g_PosX[pt]
     new Float:dy = pos[1] - g_PosY[pt]
-    new Float:dist2D = floatsqroot(dx*dx + dy*dy)
-
-    if(dist2D < POINT_MODEL_RADIUS + 30.0)
+    if(floatsqroot(dx*dx + dy*dy) < 70.0)
         return false
-
-    if(!CheckWallClearance(pos, MIN_WALL_DISTANCE))
-        return false
-
-    new Float:floorCheck[3], Float:floorEnd[3]
-    floorCheck[0] = pos[0]
-    floorCheck[1] = pos[1]
-    floorCheck[2] = pos[2]
-    floorEnd[0] = pos[0]
-    floorEnd[1] = pos[1]
-    floorEnd[2] = pos[2] - 50.0
-
-    engfunc(EngFunc_TraceLine, floorCheck, floorEnd, IGNORE_MONSTERS, 0, 0)
-
-    new Float:floorFrac
-    get_tr2(0, TR_flFraction, floorFrac)
-
-    if(floorFrac >= 1.0)
-        return false
-
-    new Float:ceilCheck[3], Float:ceilEnd[3]
-    ceilCheck[0] = pos[0]
-    ceilCheck[1] = pos[1]
-    ceilCheck[2] = pos[2]
-    ceilEnd[0] = pos[0]
-    ceilEnd[1] = pos[1]
-    ceilEnd[2] = pos[2] + 72.0
-
-    engfunc(EngFunc_TraceLine, ceilCheck, ceilEnd, IGNORE_MONSTERS, 0, 0)
-
-    new Float:ceilFrac
-    get_tr2(0, TR_flFraction, ceilFrac)
-
-    if(ceilFrac < 1.0)
-        return false
-
-    return true
-}
-
-bool:CheckWallClearance(Float:pos[3], Float:minDist)
-{
-    new Float:angles[] = { 0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0 }
-    new Float:heights[] = { 0.0, 36.0, 64.0 }
-
-    for(new h = 0; h < sizeof(heights); h++)
-    {
-        new Float:checkPos[3]
-        checkPos[0] = pos[0]
-        checkPos[1] = pos[1]
-        checkPos[2] = pos[2] + heights[h]
-
-        for(new a = 0; a < sizeof(angles); a++)
-        {
-            new Float:rad = angles[a] * 3.14159 / 180.0
-            new Float:end[3]
-            end[0] = checkPos[0] + floatcos(rad) * minDist
-            end[1] = checkPos[1] + floatsin(rad) * minDist
-            end[2] = checkPos[2]
-
-            engfunc(EngFunc_TraceLine, checkPos, end, IGNORE_MONSTERS, 0, 0)
-
-            new Float:frac
-            get_tr2(0, TR_flFraction, frac)
-
-            if(frac < 1.0)
-                return false
-        }
-    }
-
     return true
 }
 
 FindMapBounds()
 {
-    new Float:pos[3]
-    new ent = -1
+    new Float:pos[3], ent = -1
     new bool:first = true
     new ctCnt = 0, tCnt = 0
-
     g_CTBaseX = 0.0
     g_CTBaseY = 0.0
     g_TBaseX = 0.0
@@ -320,7 +176,6 @@ FindMapBounds()
     while((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "info_player_start")) > 0)
     {
         get_entvar(ent, var_origin, pos)
-
         if(first)
         {
             g_MinX = g_MaxX = pos[0]
@@ -337,7 +192,6 @@ FindMapBounds()
             if(pos[2] < g_MinZ) g_MinZ = pos[2]
             if(pos[2] > g_MaxZ) g_MaxZ = pos[2]
         }
-
         g_CTBaseX += pos[0]
         g_CTBaseY += pos[1]
         ctCnt++
@@ -347,7 +201,6 @@ FindMapBounds()
     while((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "info_player_deathmatch")) > 0)
     {
         get_entvar(ent, var_origin, pos)
-
         if(first)
         {
             g_MinX = g_MaxX = pos[0]
@@ -364,7 +217,6 @@ FindMapBounds()
             if(pos[2] < g_MinZ) g_MinZ = pos[2]
             if(pos[2] > g_MaxZ) g_MaxZ = pos[2]
         }
-
         g_TBaseX += pos[0]
         g_TBaseY += pos[1]
         tCnt++
@@ -375,20 +227,16 @@ FindMapBounds()
         g_CTBaseX /= float(ctCnt)
         g_CTBaseY /= float(ctCnt)
     }
-
     if(tCnt > 0)
     {
         g_TBaseX /= float(tCnt)
         g_TBaseY /= float(tCnt)
     }
 
-    new Float:expandX = (g_MaxX - g_MinX) * 0.1
-    new Float:expandY = (g_MaxY - g_MinY) * 0.1
-
-    g_MinX -= expandX
-    g_MaxX += expandX
-    g_MinY -= expandY
-    g_MaxY += expandY
+    g_MinX -= (g_MaxX - g_MinX) * 0.1
+    g_MaxX += (g_MaxX - g_MinX) * 0.1
+    g_MinY -= (g_MaxY - g_MinY) * 0.1
+    g_MaxY += (g_MaxY - g_MinY) * 0.1
 }
 
 CreateRandomPoints()
@@ -396,76 +244,59 @@ CreateRandomPoints()
     new maxPoints = get_pcvar_num(pCvarPointsCount)
     new Float:minDist = get_pcvar_float(pCvarMinDist)
     new Float:baseDist = get_pcvar_float(pCvarBaseDist)
-
     new attempts = 0
-    new maxAttempts = 500
 
-    while(g_Num < maxPoints && attempts < maxAttempts)
+    while(g_Num < maxPoints && attempts < 500)
     {
         attempts++
-
         new Float:testX = random_float(g_MinX, g_MaxX)
         new Float:testY = random_float(g_MinY, g_MaxY)
-        new Float:testZ = g_MaxZ + 100.0
-
         new Float:start[3], Float:end[3]
         start[0] = testX
         start[1] = testY
-        start[2] = testZ
+        start[2] = g_MaxZ + 100.0
         end[0] = testX
         end[1] = testY
         end[2] = g_MinZ - 100.0
 
         engfunc(EngFunc_TraceLine, start, end, IGNORE_MONSTERS, 0, 0)
-
         new Float:frac
         get_tr2(0, TR_flFraction, frac)
-
         if(frac >= 1.0) continue
 
         new Float:hitPos[3]
         get_tr2(0, TR_vecEndPos, hitPos)
-
         new Float:finalZ = hitPos[2] + 40.0
 
         new Float:hullStart[3]
         hullStart[0] = testX
         hullStart[1] = testY
         hullStart[2] = finalZ
-
         engfunc(EngFunc_TraceHull, hullStart, hullStart, IGNORE_MONSTERS, HULL_HUMAN, 0, 0)
-
-        if(get_tr2(0, TR_StartSolid) || get_tr2(0, TR_AllSolid))
-            continue
+        if(get_tr2(0, TR_StartSolid) || get_tr2(0, TR_AllSolid)) continue
 
         new bool:tooClose = false
-
         for(new i = 0; i < g_Num; i++)
         {
             new Float:dx = testX - g_PosX[i]
             new Float:dy = testY - g_PosY[i]
-
             if(floatsqroot(dx*dx + dy*dy) < minDist)
             {
                 tooClose = true
                 break
             }
         }
-
         if(tooClose) continue
 
         new Float:dxCT = testX - g_CTBaseX
         new Float:dyCT = testY - g_CTBaseY
         new Float:dxT = testX - g_TBaseX
         new Float:dyT = testY - g_TBaseY
-
         if(floatsqroot(dxCT*dxCT + dyCT*dyCT) < baseDist) continue
         if(floatsqroot(dxT*dxT + dyT*dyT) < baseDist) continue
 
         MakePoint(testX, testY, finalZ)
     }
-
-    server_print("[CP] Создано %d точек за %d попыток", g_Num, attempts)
 }
 
 MakePoint(Float:x, Float:y, Float:z)
@@ -509,17 +340,15 @@ MakePoint(Float:x, Float:y, Float:z)
 public Announce()
 {
     new reward = get_pcvar_num(pCvarReward)
-
     set_dhudmessage(0, 255, 0, -1.0, 0.3, 2, 0.1, 5.0, 0.1, 0.1)
-    show_dhudmessage(0, "=== ЗАХВАТ ТОЧЕК ===^nТочек: %d | Награда: $%d", g_Num, reward)
-    SayAll("^4[CP]^1 Захвати точку - команда получит^3 $%d", reward)
+    show_dhudmessage(0, "=== CAPTURE POINTS ===^nPoints: %d | Reward: $%d", g_Num, reward)
+    SayAll("^4[CP]^1 Capture a point - team gets^3 $%d", reward)
 }
 
 SayAll(const msg[], any:...)
 {
     new buf[192]
     vformat(buf, charsmax(buf), msg, 2)
-
     new pls[32], n
     get_players(pls, n)
     for(new i = 0; i < n; i++)
@@ -528,25 +357,6 @@ SayAll(const msg[], any:...)
         write_byte(pls[i])
         write_string(buf)
         message_end()
-    }
-}
-
-SayTeam(TeamName:team, const msg[], any:...)
-{
-    new buf[192]
-    vformat(buf, charsmax(buf), msg, 3)
-
-    new pls[32], n
-    get_players(pls, n)
-    for(new i = 0; i < n; i++)
-    {
-        if(get_member(pls[i], m_iTeam) == team)
-        {
-            message_begin(MSG_ONE_UNRELIABLE, g_MsgSay, _, pls[i])
-            write_byte(pls[i])
-            write_string(buf)
-            message_end()
-        }
     }
 }
 
@@ -570,17 +380,7 @@ public OnTouch(ent, id)
 
     new my = (tm == TEAM_CT) ? 2 : 1
 
-    if(g_State[pt] == my)
-    {
-        if(get_pcvar_num(pCvarShowHud))
-        {
-            new r = (my == 2) ? 100 : 255
-            new b = (my == 2) ? 255 : 100
-            set_hudmessage(r, 150, b, -1.0, 0.65, 0, 0.0, 0.4, 0.0, 0.0, 2)
-            show_hudmessage(id, "~ ТОЧКА #%d ~^n[ %s ]", pt+1, my==2 ? "СПЕЦНАЗ" : "ТЕРРОРИСТЫ")
-        }
-        return
-    }
+    if(g_State[pt] == my) return
 
     new Float:now = get_gametime()
     new capTime = get_pcvar_num(pCvarCapTime)
@@ -592,10 +392,7 @@ public OnTouch(ent, id)
             new oldState = g_State[pt]
             g_State[pt] = my
             StopCapture(id)
-
-            // Запоминаем что игрок захватил эту точку
             g_LastCapturedPoint[id] = pt
-
             g_SpawnCountOnPoint[pt] = 0
 
             if(my == 2)
@@ -614,7 +411,6 @@ public OnTouch(ent, id)
             get_players(pls, n)
 
             new bool:bCanReward = bool:lvl_can_reward()
-
             if(!bCanReward)
                 lvl_show_low_players(id)
 
@@ -622,21 +418,12 @@ public OnTouch(ent, id)
             {
                 new pid = pls[i]
                 new TeamName:ptm = get_member(pid, m_iTeam)
-
                 if(ptm == tm && bCanReward)
                     lvl_add_money(pid, reward)
             }
 
-            new ct = 0, tt = 0
-            for(new i = 0; i < g_Num; i++)
-            {
-                if(g_State[i] == 2) ct++
-                else if(g_State[i] == 1) tt++
-            }
-
             new name[32]
             get_user_name(id, name, charsmax(name))
-
             new enemy = (my == 2) ? 1 : 2
 
             if(get_pcvar_num(pCvarSound))
@@ -654,17 +441,9 @@ public OnTouch(ent, id)
                 if(bCanReward)
                 {
                     lvl_give_xp(id, lvl_get_xp_point_recapture())
-
-                    new recapBonus = get_pcvar_num(pCvarRecapBonus)
-                    lvl_add_money(id, recapBonus)
-
+                    lvl_add_money(id, get_pcvar_num(pCvarRecapBonus))
                     stats_add_point(id)
                 }
-
-                SayTeam(tm, "^4[CP]^3 %s^1 отбил вражескую точку^4 #%d^1! [^3+$%d бонус^1]", name, pt+1, get_pcvar_num(pCvarRecapBonus))
-
-                new TeamName:enemyTeam = (tm == TEAM_CT) ? TEAM_TERRORIST : TEAM_CT
-                SayTeam(enemyTeam, "^4[CP]^3 %s^1 захватил вашу точку^4 #%d^1!", name, pt+1)
             }
             else
             {
@@ -673,38 +452,9 @@ public OnTouch(ent, id)
                     lvl_give_xp(id, lvl_get_xp_point_capture())
                     stats_add_point(id)
                 }
-                SayAll("^4[CP]^3 %s^1 захватил нейтральную точку^4 #%d", name, pt+1)
             }
 
-            SayAll("^4[CP]^1 Команда^3 %s^1 получила^4 +$%d", my==2 ? "CT" : "T", reward)
-            SayAll("^4[CP]^1 Счёт: CT:^3%d^1 | T:^3%d^1 | Нейтр:^3%d", ct, tt, g_Num - ct - tt)
-
-            if(get_pcvar_num(pCvarEffect))
-            {
-                new Float:epos[3]
-                get_entvar(ent, var_origin, epos)
-
-                message_begin(MSG_BROADCAST, SVC_TEMPENTITY)
-                write_byte(TE_BEAMCYLINDER)
-                write_coord(floatround(epos[0]))
-                write_coord(floatround(epos[1]))
-                write_coord(floatround(epos[2]))
-                write_coord(floatround(epos[0]))
-                write_coord(floatround(epos[1]))
-                write_coord(floatround(epos[2] + 400.0))
-                write_short(g_Spr)
-                write_byte(0)
-                write_byte(0)
-                write_byte(10)
-                write_byte(60)
-                write_byte(0)
-                write_byte(my==2 ? 0 : 255)
-                write_byte(0)
-                write_byte(my==2 ? 255 : 0)
-                write_byte(255)
-                write_byte(0)
-                message_end()
-            }
+            SayAll("^4[CP]^3 %s^1 captured point^4 #%d", name, pt+1)
         }
         return
     }
@@ -743,8 +493,7 @@ public CheckCapture(data[], id)
     get_entvar(id, var_origin, ppos)
     get_entvar(ent, var_origin, epos)
 
-    new Float:capRadius = get_pcvar_float(pCvarCapRadius)
-    if(get_distance_f(ppos, epos) > capRadius)
+    if(get_distance_f(ppos, epos) > get_pcvar_float(pCvarCapRadius))
     {
         StopCapture(id)
         return
@@ -754,18 +503,6 @@ public CheckCapture(data[], id)
 
     new capTime = get_pcvar_num(pCvarCapTime)
     if(capTime <= 0) capTime = 1
-    new reward = get_pcvar_num(pCvarReward)
-
-    new pt = FindPointByEnt(ent)
-    new TeamName:tm = get_member(id, m_iTeam)
-    new my = (tm == TEAM_CT) ? 2 : 1
-    new enemy = (my == 2) ? 1 : 2
-    new xpReward = (g_State[pt] == enemy) ? lvl_get_xp_point_recapture() : lvl_get_xp_point_capture()
-    new xpType[32]
-    if(g_State[pt] == enemy)
-        copy(xpType, charsmax(xpType), "вражеская")
-    else
-        copy(xpType, charsmax(xpType), "нейтральная")
 
     new Float:left = g_CapEnd[id] - get_gametime()
     new pct = 100 - floatround(left * 100.0 / float(capTime))
@@ -777,14 +514,8 @@ public CheckCapture(data[], id)
     else if(pct < 66) { r = 255; g = 200; b = 0; }
     else { r = 50; g = 255; b = 50; }
 
-    new bar[21]
-    new filled = pct / 5
-    for(new i = 0; i < 20; i++)
-        bar[i] = (i < filled) ? '|' : '.'
-    bar[20] = 0
-
     set_hudmessage(r, g, b, -1.0, 0.65, 0, 0.0, 0.4, 0.0, 0.0, 2)
-    show_hudmessage(id, ">>> ЗАХВАТ ТОЧКИ #%d <<<^n[ %s ] %d%%^n^nНаграда: $%d команде^nОпыт: +%d XP (%s)", pt+1, bar, pct, reward, xpReward, xpType)
+    show_hudmessage(id, ">>> CAPTURING #%d <<< %d%%", FindPointByEnt(ent)+1, pct)
 }
 
 FindPointByEnt(ent)
@@ -810,10 +541,6 @@ SetColor(ent, r, g, b)
     set_entvar(ent, var_rendercolor, clr)
 }
 
-// ============================================
-// УМНАЯ СИСТЕМА СПАВНА v2
-// ============================================
-
 public OnSpawn(id)
 {
     StopCapture(id)
@@ -825,373 +552,56 @@ public OnSpawn(id)
     if(tm != TEAM_TERRORIST && tm != TEAM_CT) return
 
     new spawnMode = get_pcvar_num(pCvarSpawnMode)
-
-    switch(spawnMode)
-    {
-        case 0: return  // Только база
-        case 1: SpawnMode_Random(id, tm)
-        case 2: SpawnMode_Smart(id, tm)
-        case 3: SpawnMode_Strategic(id, tm)
-    }
+    if(spawnMode == 2)
+        SpawnMode_Smart(id, tm)
 }
 
-// Режим 1: Случайный спавн на точках (50/50)
-SpawnMode_Random(id, TeamName:tm)
-{
-    new my = (tm == TEAM_CT) ? 2 : 1
-
-    new teamPoints[MAX_POINTS], teamPointCount = 0
-    for(new i = 0; i < g_Num; i++)
-    {
-        if(g_State[i] == my && g_SafeSpawnCount[i] > 0)
-            teamPoints[teamPointCount++] = i
-    }
-
-    if(teamPointCount == 0) return
-
-    // 50% шанс спавна на точке
-    if(random(100) >= 50) return
-
-    new pt = teamPoints[random(teamPointCount)]
-
-    new Float:spawnPos[3]
-    if(FindFreeSpawnPosition(id, pt, spawnPos))
-    {
-        set_entvar(id, var_origin, spawnPos)
-        g_SpawnCountOnPoint[pt]++
-    }
-}
-
-// Режим 2: Умный спавн (место смерти → нейтральные → последняя захваченная → точки → база)
 SpawnMode_Smart(id, TeamName:tm)
 {
     new my = (tm == TEAM_CT) ? 2 : 1
 
-    server_print("[CP DEBUG] SpawnMode_Smart: player=%d team=%d", id, my)
-
-    // Собираем точки команды
     new teamPoints[MAX_POINTS], teamPointCount = 0
     for(new i = 0; i < g_Num; i++)
     {
-        server_print("[CP DEBUG] Point #%d: state=%d safeSpawns=%d (need state=%d)", i+1, g_State[i], g_SafeSpawnCount[i], my)
         if(g_State[i] == my && g_SafeSpawnCount[i] > 0)
             teamPoints[teamPointCount++] = i
     }
 
-    server_print("[CP DEBUG] teamPointCount=%d", teamPointCount)
-
-    // Собираем нейтральные точки
-    new neutralPoints[MAX_POINTS], neutralCount = 0
-    for(new i = 0; i < g_Num; i++)
-    {
-        if(g_State[i] == 0 && g_SafeSpawnCount[i] > 0)
-            neutralPoints[neutralCount++] = i
-    }
-
-    server_print("[CP DEBUG] neutralCount=%d", neutralCount)
-
     new Float:spawnPos[3]
 
-    // Приоритет 1: Спавн рядом с местом смерти (если есть своя точка рядом)
-    if(g_HasDeathPos[id])
-    {
-        server_print("[CP DEBUG] Priority 1: Has death pos")
-        new nearestPoint = FindNearestTeamPoint(g_DeathPos[id], my, DEATH_SPAWN_RADIUS)
-        server_print("[CP DEBUG] nearestPoint=%d", nearestPoint)
-        if(nearestPoint != -1 && FindFreeSpawnPosition(id, nearestPoint, spawnPos))
-        {
-            set_entvar(id, var_origin, spawnPos)
-            g_SpawnCountOnPoint[nearestPoint]++
-            g_HasDeathPos[id] = false
-            server_print("[CP DEBUG] SPAWNED on death point #%d", nearestPoint+1)
-            return
-        }
-    }
-
-    // Приоритет 2: Шанс спавна у НЕЙТРАЛЬНОЙ точки (для захвата)
-    if(neutralCount > 0)
-    {
-        new neutralChance = get_pcvar_num(pCvarNeutralChance)
-        new roll = random(100)
-        server_print("[CP DEBUG] Priority 2: neutral roll=%d chance=%d", roll, neutralChance)
-        if(roll < neutralChance)
-        {
-            // Выбираем нейтральную точку ближе к нашей базе (безопаснее)
-            new bestNeutral = FindNeutralNearBase(neutralPoints, neutralCount, tm)
-
-            if(bestNeutral != -1 && FindFreeSpawnPosition(id, bestNeutral, spawnPos))
-            {
-                set_entvar(id, var_origin, spawnPos)
-                g_SpawnCountOnPoint[bestNeutral]++
-                server_print("[CP DEBUG] SPAWNED on neutral point #%d", bestNeutral+1)
-                return
-            }
-        }
-    }
-
-    // Приоритет 3: Последняя захваченная игроком точка
     new lastCap = g_LastCapturedPoint[id]
-    server_print("[CP DEBUG] Priority 3: lastCap=%d g_Num=%d", lastCap, g_Num)
-    if(lastCap >= 0 && lastCap < g_Num)
-    {
-        server_print("[CP DEBUG] lastCap state=%d (need=%d) safeSpawns=%d", g_State[lastCap], my, g_SafeSpawnCount[lastCap])
-    }
     if(lastCap >= 0 && lastCap < g_Num && g_State[lastCap] == my)
     {
         if(FindFreeSpawnPosition(id, lastCap, spawnPos))
         {
             set_entvar(id, var_origin, spawnPos)
             g_SpawnCountOnPoint[lastCap]++
-            server_print("[CP DEBUG] SPAWNED on last captured point #%d", lastCap+1)
             return
-        }
-        else
-        {
-            server_print("[CP DEBUG] FindFreeSpawnPosition FAILED for lastCap #%d", lastCap+1)
         }
     }
 
-    // Приоритет 4: Распределение по точкам с балансировкой
     if(teamPointCount > 0)
     {
-        new selectedPoint = SelectLeastPopulatedPoint(teamPoints, teamPointCount)
-        server_print("[CP DEBUG] Priority 4: selectedPoint=%d", selectedPoint)
-
-        if(selectedPoint != -1 && FindFreeSpawnPosition(id, selectedPoint, spawnPos))
+        new pt = teamPoints[random(teamPointCount)]
+        if(FindFreeSpawnPosition(id, pt, spawnPos))
         {
             set_entvar(id, var_origin, spawnPos)
-            g_SpawnCountOnPoint[selectedPoint]++
-            server_print("[CP DEBUG] SPAWNED on least populated point #%d", selectedPoint+1)
-            return
+            g_SpawnCountOnPoint[pt]++
         }
-        else
-        {
-            server_print("[CP DEBUG] FindFreeSpawnPosition FAILED for selectedPoint")
-        }
-    }
-
-    server_print("[CP DEBUG] NO SPAWN LOCATION FOUND - spawning at base")
-}
-
-// Режим 3: Стратегический (распределение по линии фронта)
-SpawnMode_Strategic(id, TeamName:tm)
-{
-    new my = (tm == TEAM_CT) ? 2 : 1
-    new enemy = (my == 2) ? 1 : 2
-
-    // Собираем точки команды
-    new teamPoints[MAX_POINTS], teamPointCount = 0
-    for(new i = 0; i < g_Num; i++)
-    {
-        if(g_State[i] == my && g_SafeSpawnCount[i] > 0)
-            teamPoints[teamPointCount++] = i
-    }
-
-    if(teamPointCount == 0) return
-
-    // Считаем количество точек у каждой команды
-    new myPointsTotal = 0, enemyPointsTotal = 0
-    for(new i = 0; i < g_Num; i++)
-    {
-        if(g_State[i] == my) myPointsTotal++
-        else if(g_State[i] == enemy) enemyPointsTotal++
-    }
-
-    new Float:spawnPos[3]
-    new selectedPoint = -1
-
-    // Стратегия зависит от соотношения точек
-    if(myPointsTotal <= enemyPointsTotal)
-    {
-        // Мы проигрываем или равны - концентрируем силы на передовых точках
-        // Ищем точку ближе всего к врагу
-        selectedPoint = FindFrontlinePoint(teamPoints, teamPointCount, enemy)
-    }
-    else
-    {
-        // Мы выигрываем - распределяем равномерно для защиты
-        selectedPoint = SelectLeastPopulatedPoint(teamPoints, teamPointCount)
-    }
-
-    if(selectedPoint != -1 && FindFreeSpawnPosition(id, selectedPoint, spawnPos))
-    {
-        set_entvar(id, var_origin, spawnPos)
-        g_SpawnCountOnPoint[selectedPoint]++
     }
 }
 
-// Найти точку команды ближайшую к позиции
-FindNearestTeamPoint(Float:pos[3], team, Float:maxRadius)
-{
-    new nearest = -1
-    new Float:nearestDist = maxRadius
-
-    for(new i = 0; i < g_Num; i++)
-    {
-        if(g_State[i] != team) continue
-        if(g_SafeSpawnCount[i] == 0) continue
-
-        new Float:dx = pos[0] - g_PosX[i]
-        new Float:dy = pos[1] - g_PosY[i]
-        new Float:dist = floatsqroot(dx*dx + dy*dy)
-
-        if(dist < nearestDist)
-        {
-            nearestDist = dist
-            nearest = i
-        }
-    }
-
-    return nearest
-}
-
-// Найти передовую точку (ближайшую к врагу)
-FindFrontlinePoint(teamPoints[], teamPointCount, enemyTeam)
-{
-    if(teamPointCount == 0) return -1
-
-    new bestPoint = teamPoints[0]
-    new Float:bestDist = 999999.0
-
-    // Находим центр вражеских точек
-    new Float:enemyCenterX = 0.0, Float:enemyCenterY = 0.0
-    new enemyCount = 0
-
-    for(new i = 0; i < g_Num; i++)
-    {
-        if(g_State[i] == enemyTeam)
-        {
-            enemyCenterX += g_PosX[i]
-            enemyCenterY += g_PosY[i]
-            enemyCount++
-        }
-    }
-
-    // Если у врага нет точек - используем вражескую базу
-    if(enemyCount == 0)
-    {
-        if(enemyTeam == 1)  // T
-        {
-            enemyCenterX = g_TBaseX
-            enemyCenterY = g_TBaseY
-        }
-        else  // CT
-        {
-            enemyCenterX = g_CTBaseX
-            enemyCenterY = g_CTBaseY
-        }
-    }
-    else
-    {
-        enemyCenterX /= float(enemyCount)
-        enemyCenterY /= float(enemyCount)
-    }
-
-    // Ищем нашу точку ближайшую к врагу
-    for(new i = 0; i < teamPointCount; i++)
-    {
-        new pt = teamPoints[i]
-        new Float:dx = g_PosX[pt] - enemyCenterX
-        new Float:dy = g_PosY[pt] - enemyCenterY
-        new Float:dist = floatsqroot(dx*dx + dy*dy)
-
-        if(dist < bestDist)
-        {
-            bestDist = dist
-            bestPoint = pt
-        }
-    }
-
-    return bestPoint
-}
-
-// Найти нейтральную точку ближе к своей базе (для безопасного захвата)
-FindNeutralNearBase(neutralPoints[], neutralCount, TeamName:tm)
-{
-    if(neutralCount == 0) return -1
-    if(neutralCount == 1) return neutralPoints[0]
-
-    // Определяем позицию нашей базы
-    new Float:baseX, Float:baseY
-    if(tm == TEAM_CT)
-    {
-        baseX = g_CTBaseX
-        baseY = g_CTBaseY
-    }
-    else
-    {
-        baseX = g_TBaseX
-        baseY = g_TBaseY
-    }
-
-    // Ищем нейтральную точку ближайшую к нашей базе
-    new bestPoint = neutralPoints[0]
-    new Float:bestDist = 999999.0
-
-    for(new i = 0; i < neutralCount; i++)
-    {
-        new pt = neutralPoints[i]
-        new Float:dx = g_PosX[pt] - baseX
-        new Float:dy = g_PosY[pt] - baseY
-        new Float:dist = floatsqroot(dx*dx + dy*dy)
-
-        // Учитываем сколько уже спавнилось на этой точке (меньше = лучше)
-        dist += float(g_SpawnCountOnPoint[pt]) * 100.0
-
-        if(dist < bestDist)
-        {
-            bestDist = dist
-            bestPoint = pt
-        }
-    }
-
-    return bestPoint
-}
-
-// Выбрать точку с наименьшим количеством спавнов
-SelectLeastPopulatedPoint(teamPoints[], teamPointCount)
-{
-    if(teamPointCount == 0) return -1
-    if(teamPointCount == 1) return teamPoints[0]
-
-    // Находим минимальное количество спавнов
-    new bestCount = g_SpawnCountOnPoint[teamPoints[0]]
-    for(new i = 1; i < teamPointCount; i++)
-    {
-        if(g_SpawnCountOnPoint[teamPoints[i]] < bestCount)
-            bestCount = g_SpawnCountOnPoint[teamPoints[i]]
-    }
-
-    // Собираем все точки с минимальным счётом
-    new candidates[MAX_POINTS], candCount = 0
-    for(new i = 0; i < teamPointCount; i++)
-    {
-        if(g_SpawnCountOnPoint[teamPoints[i]] == bestCount)
-            candidates[candCount++] = teamPoints[i]
-    }
-
-    // Выбираем случайную из них
-    return candidates[random(candCount)]
-}
-
-// Поиск свободной позиции
 bool:FindFreeSpawnPosition(id, pt, Float:outPos[3])
 {
-    server_print("[CP DEBUG] FindFreeSpawnPosition: pt=%d safeSpawnCount=%d", pt, g_SafeSpawnCount[pt])
     if(g_SafeSpawnCount[pt] == 0)
-    {
-        server_print("[CP DEBUG] FindFreeSpawnPosition: NO SAFE POSITIONS for point #%d", pt+1)
         return false
-    }
 
-    // Перемешиваем порядок
     new order[MAX_SPAWN_POSITIONS]
     new orderCount = g_SafeSpawnCount[pt]
 
     for(new i = 0; i < orderCount; i++)
         order[i] = i
 
-    // Fisher-Yates shuffle
     for(new i = orderCount - 1; i > 0; i--)
     {
         new j = random(i + 1)
@@ -1208,7 +618,8 @@ bool:FindFreeSpawnPosition(id, pt, Float:outPos[3])
         pos[1] = g_SafeSpawns[pt][idx][1]
         pos[2] = g_SafeSpawns[pt][idx][2]
 
-        if(IsPositionFreeFromPlayers(pos, id))
+        engfunc(EngFunc_TraceHull, pos, pos, DONT_IGNORE_MONSTERS, HULL_HUMAN, id)
+        if(!get_tr2(0, TR_StartSolid) && !get_tr2(0, TR_AllSolid))
         {
             outPos[0] = pos[0]
             outPos[1] = pos[1]
@@ -1219,35 +630,6 @@ bool:FindFreeSpawnPosition(id, pt, Float:outPos[3])
 
     return false
 }
-
-bool:IsPositionFreeFromPlayers(Float:pos[3], excludeId)
-{
-    engfunc(EngFunc_TraceHull, pos, pos, DONT_IGNORE_MONSTERS, HULL_HUMAN, excludeId)
-
-    if(get_tr2(0, TR_StartSolid) || get_tr2(0, TR_AllSolid))
-        return false
-
-    new Float:playerPos[3]
-    for(new i = 1; i <= MAX_CLIENTS; i++)
-    {
-        if(i == excludeId) continue
-        if(!is_user_connected(i) || !is_user_alive(i)) continue
-
-        get_entvar(i, var_origin, playerPos)
-
-        new Float:dx = pos[0] - playerPos[0]
-        new Float:dy = pos[1] - playerPos[1]
-        new Float:dz = pos[2] - playerPos[2]
-        new Float:dist = floatsqroot(dx*dx + dy*dy + dz*dz)
-
-        if(dist < MIN_PLAYER_DISTANCE)
-            return false
-    }
-
-    return true
-}
-
-// ============================================
 
 public OnRound()
 {
@@ -1261,16 +643,6 @@ public OnRound()
 
     for(new i = 0; i < g_Num; i++)
         g_SpawnCountOnPoint[i] = 0
-
-    new ct = 0, tt = 0, neu = 0
-    for(new i = 0; i < g_Num; i++)
-    {
-        if(g_State[i] == 2) ct++
-        else if(g_State[i] == 1) tt++
-        else neu++
-    }
-
-    SayAll("^4[CP]^1 Раунд! CT:^3%d^1 | T:^3%d^1 | Нейтр:^3%d", ct, tt, neu)
 }
 
 public client_disconnected(id)
