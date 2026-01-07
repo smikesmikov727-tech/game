@@ -1,11 +1,11 @@
 /*
- * CAPTURE POINTS v21 - Улучшенная система спавна
+ * CAPTURE POINTS v22 - Умная система спавна
  *
- * Изменения:
- * - Убрана система /stuck (больше не нужна)
- * - Новая умная система спавна с разнообразием
- * - Игроки спавнятся на базе + на захваченных точках с балансировкой
- * - Гарантия отсутствия застревания
+ * Особенности:
+ * - Запоминание места смерти (спавн рядом если есть своя точка)
+ * - Умное распределение по точкам в зависимости от их количества
+ * - Приоритеты: место смерти → захваченные точки → база
+ * - Балансировка нагрузки на точки
  */
 
 #include <amxmodx>
@@ -16,10 +16,11 @@
 #include <stats_system>
 
 #define MAX_POINTS 16
-#define MAX_SPAWN_POSITIONS 64  // Максимум позиций для спавна на точку
-#define MIN_WALL_DISTANCE 48.0  // Минимальное расстояние от стен
-#define MIN_PLAYER_DISTANCE 80.0  // Минимальное расстояние между игроками
-#define POINT_MODEL_RADIUS 40.0  // Радиус модели точки (не спавнить внутри)
+#define MAX_SPAWN_POSITIONS 64
+#define MIN_WALL_DISTANCE 48.0
+#define MIN_PLAYER_DISTANCE 80.0
+#define POINT_MODEL_RADIUS 40.0
+#define DEATH_SPAWN_RADIUS 500.0  // Радиус поиска точки рядом с местом смерти
 
 #if !defined MAX_CLIENTS
     #define MAX_CLIENTS 32
@@ -35,23 +36,28 @@ new const MODELS[][] = {
 new pCvarPointsCount, pCvarCapTime, pCvarReward
 new pCvarMinDist, pCvarBaseDist, pCvarCapRadius
 new pCvarSpawnOnPoints, pCvarShowHud, pCvarSound, pCvarEffect, pCvarRecapBonus
-new pCvarSpawnBalance  // Новый квар для баланса спавна
+new pCvarSpawnMode  // Режим спавна
 
+// Точки захвата
 new g_Ent[MAX_POINTS]
 new Float:g_PosX[MAX_POINTS], Float:g_PosY[MAX_POINTS], Float:g_PosZ[MAX_POINTS]
-new g_State[MAX_POINTS]
+new g_State[MAX_POINTS]  // 0 = нейтрально, 1 = T, 2 = CT
 new g_Num
 
+// Захват
 new Float:g_CapEnd[33]
 new bool:g_Capturing[33]
 new g_CapEnt[33]
 
-// Система спавна - прекэшированные безопасные позиции для каждой точки
+// Система спавна
 new Float:g_SafeSpawns[MAX_POINTS][MAX_SPAWN_POSITIONS][3]
 new g_SafeSpawnCount[MAX_POINTS]
-
-// Счётчик спавнов на точках (для балансировки)
 new g_SpawnCountOnPoint[MAX_POINTS]
+
+// Место смерти игрока
+new Float:g_DeathPos[33][3]
+new bool:g_HasDeathPos[33]
+new g_LastCapturedPoint[33]  // Последняя захваченная точка игроком
 
 // Границы карты
 new Float:g_MinX, Float:g_MaxX
@@ -73,7 +79,7 @@ public plugin_precache()
 
 public plugin_init()
 {
-    register_plugin("Capture Points", "21", "AI")
+    register_plugin("Capture Points", "22", "AI")
 
     pCvarPointsCount = register_cvar("cp_points_count", "7")
     pCvarCapTime = register_cvar("cp_capture_time", "8")
@@ -87,11 +93,15 @@ public plugin_init()
     pCvarEffect = register_cvar("cp_capture_effect", "1")
     pCvarRecapBonus = register_cvar("cp_recapture_bonus", "700")
 
-    // Новый квар: баланс спавна (0-100)
-    // 0 = всегда на базе, 100 = всегда на точках, 50 = 50/50
-    pCvarSpawnBalance = register_cvar("cp_spawn_balance", "60")
+    // Режим спавна:
+    // 0 = только база
+    // 1 = база + точки (случайно)
+    // 2 = умный спавн (место смерти → точки → база)
+    // 3 = стратегический (распределение по фронту)
+    pCvarSpawnMode = register_cvar("cp_spawn_mode", "2")
 
     RegisterHookChain(RG_CBasePlayer_Spawn, "OnSpawn", true)
+    RegisterHookChain(RG_CBasePlayer_Killed, "OnDeath", false)
     RegisterHookChain(RG_CSGameRules_RestartRound, "OnRound", false)
 
     g_MsgSay = get_user_msgid("SayText")
@@ -104,34 +114,30 @@ public plugin_init()
     set_task(3.0, "InitPoints")
 }
 
+// Сохраняем место смерти
+public OnDeath(victim, attacker)
+{
+    if(!is_user_connected(victim))
+        return
+
+    get_entvar(victim, var_origin, g_DeathPos[victim])
+    g_HasDeathPos[victim] = true
+}
+
 public InitPoints()
 {
-    server_print("[CP] === Настройки ===")
+    server_print("[CP] === Capture Points v22 ===")
     server_print("[CP] Точек: %d", get_pcvar_num(pCvarPointsCount))
-    server_print("[CP] Время захвата: %d сек", get_pcvar_num(pCvarCapTime))
-    server_print("[CP] Награда: $%d", get_pcvar_num(pCvarReward))
-    server_print("[CP] Мин. расстояние: %.0f", get_pcvar_float(pCvarMinDist))
-    server_print("[CP] От баз: %.0f", get_pcvar_float(pCvarBaseDist))
-    server_print("[CP] Радиус захвата: %.0f", get_pcvar_float(pCvarCapRadius))
-    server_print("[CP] Баланс спавна: %d%%", get_pcvar_num(pCvarSpawnBalance))
-    server_print("[CP] =================")
+    server_print("[CP] Режим спавна: %d", get_pcvar_num(pCvarSpawnMode))
+    server_print("[CP] ===========================")
 
     FindMapBounds()
-
-    server_print("[CP] Границы карты:")
-    server_print("[CP] X: %.0f - %.0f", g_MinX, g_MaxX)
-    server_print("[CP] Y: %.0f - %.0f", g_MinY, g_MaxY)
-    server_print("[CP] Z: %.0f - %.0f", g_MinZ, g_MaxZ)
-
     CreateRandomPoints()
 
     if(g_Num > 0)
     {
         server_print("[CP] Создано точек: %d", g_Num)
-
-        // Прекэшируем безопасные позиции для спавна
         PrecacheSafeSpawnPositions()
-
         set_task(2.0, "Announce")
     }
     else
@@ -140,7 +146,6 @@ public InitPoints()
     }
 }
 
-// Прекэширование безопасных позиций спавна для каждой точки
 PrecacheSafeSpawnPositions()
 {
     server_print("[CP] Кэширование позиций спавна...")
@@ -149,12 +154,10 @@ PrecacheSafeSpawnPositions()
     {
         g_SafeSpawnCount[pt] = 0
 
-        // Генерируем позиции по кругу вокруг точки
-        // Начинаем с большего радиуса чтобы не застревать в модели
-        new Float:startRadius = POINT_MODEL_RADIUS + 60.0  // 100 единиц от центра
+        new Float:startRadius = POINT_MODEL_RADIUS + 60.0
         new Float:maxRadius = 350.0
         new Float:radiusStep = 40.0
-        new Float:angleStep = 30.0  // 12 направлений
+        new Float:angleStep = 30.0
 
         for(new Float:radius = startRadius; radius <= maxRadius && g_SafeSpawnCount[pt] < MAX_SPAWN_POSITIONS; radius += radiusStep)
         {
@@ -164,7 +167,6 @@ PrecacheSafeSpawnPositions()
                 new Float:testX = g_PosX[pt] + floatcos(rad) * radius
                 new Float:testY = g_PosY[pt] + floatsin(rad) * radius
 
-                // Трассируем вниз чтобы найти пол
                 new Float:start[3], Float:end[3]
                 start[0] = testX
                 start[1] = testY
@@ -178,7 +180,7 @@ PrecacheSafeSpawnPositions()
                 new Float:frac
                 get_tr2(0, TR_flFraction, frac)
 
-                if(frac >= 1.0) continue  // Нет пола
+                if(frac >= 1.0) continue
 
                 new Float:hitPos[3]
                 get_tr2(0, TR_vecEndPos, hitPos)
@@ -186,9 +188,8 @@ PrecacheSafeSpawnPositions()
                 new Float:spawnPos[3]
                 spawnPos[0] = hitPos[0]
                 spawnPos[1] = hitPos[1]
-                spawnPos[2] = hitPos[2] + 36.0  // Над полом
+                spawnPos[2] = hitPos[2] + 36.0
 
-                // Проверяем что позиция полностью безопасна
                 if(IsPositionSafeForSpawn(spawnPos, pt))
                 {
                     g_SafeSpawns[pt][g_SafeSpawnCount[pt]][0] = spawnPos[0]
@@ -199,32 +200,27 @@ PrecacheSafeSpawnPositions()
             }
         }
 
-        server_print("[CP] Точка #%d: найдено %d безопасных позиций", pt + 1, g_SafeSpawnCount[pt])
+        server_print("[CP] Точка #%d: %d позиций", pt + 1, g_SafeSpawnCount[pt])
     }
 }
 
-// Проверка что позиция безопасна для спавна (статическая проверка)
 bool:IsPositionSafeForSpawn(Float:pos[3], pt)
 {
-    // 1. Проверяем hull - место должно быть свободно
     engfunc(EngFunc_TraceHull, pos, pos, IGNORE_MONSTERS, HULL_HUMAN, 0)
 
     if(get_tr2(0, TR_StartSolid) || get_tr2(0, TR_AllSolid))
         return false
 
-    // 2. Проверяем что не слишком близко к модели точки
     new Float:dx = pos[0] - g_PosX[pt]
     new Float:dy = pos[1] - g_PosY[pt]
     new Float:dist2D = floatsqroot(dx*dx + dy*dy)
 
-    if(dist2D < POINT_MODEL_RADIUS + 30.0)  // Минимум 70 единиц от центра точки
+    if(dist2D < POINT_MODEL_RADIUS + 30.0)
         return false
 
-    // 3. Проверяем расстояние до стен (8 направлений на 3 высотах)
     if(!CheckWallClearance(pos, MIN_WALL_DISTANCE))
         return false
 
-    // 4. Проверяем что есть пол под ногами
     new Float:floorCheck[3], Float:floorEnd[3]
     floorCheck[0] = pos[0]
     floorCheck[1] = pos[1]
@@ -238,30 +234,28 @@ bool:IsPositionSafeForSpawn(Float:pos[3], pt)
     new Float:floorFrac
     get_tr2(0, TR_flFraction, floorFrac)
 
-    if(floorFrac >= 1.0)  // Нет пола - пропасть
+    if(floorFrac >= 1.0)
         return false
 
-    // 5. Проверяем что есть место над головой
     new Float:ceilCheck[3], Float:ceilEnd[3]
     ceilCheck[0] = pos[0]
     ceilCheck[1] = pos[1]
     ceilCheck[2] = pos[2]
     ceilEnd[0] = pos[0]
     ceilEnd[1] = pos[1]
-    ceilEnd[2] = pos[2] + 72.0  // Высота игрока
+    ceilEnd[2] = pos[2] + 72.0
 
     engfunc(EngFunc_TraceLine, ceilCheck, ceilEnd, IGNORE_MONSTERS, 0, 0)
 
     new Float:ceilFrac
     get_tr2(0, TR_flFraction, ceilFrac)
 
-    if(ceilFrac < 1.0)  // Потолок слишком низко
+    if(ceilFrac < 1.0)
         return false
 
     return true
 }
 
-// Проверка расстояния до стен
 bool:CheckWallClearance(Float:pos[3], Float:minDist)
 {
     new Float:angles[] = { 0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0 }
@@ -453,10 +447,9 @@ CreateRandomPoints()
         if(floatsqroot(dxT*dxT + dyT*dyT) < baseDist) continue
 
         MakePoint(testX, testY, finalZ)
-        server_print("[CP] Точка #%d: %.0f %.0f %.0f", g_Num, testX, testY, finalZ)
     }
 
-    server_print("[CP] Попыток: %d", attempts)
+    server_print("[CP] Создано %d точек за %d попыток", g_Num, attempts)
 }
 
 MakePoint(Float:x, Float:y, Float:z)
@@ -584,7 +577,9 @@ public OnTouch(ent, id)
             g_State[pt] = my
             StopCapture(id)
 
-            // Сбрасываем счётчик спавнов при смене владельца
+            // Запоминаем что игрок захватил эту точку
+            g_LastCapturedPoint[id] = pt
+
             g_SpawnCountOnPoint[pt] = 0
 
             if(my == 2)
@@ -620,8 +615,6 @@ public OnTouch(ent, id)
                     rewarded++
                 }
             }
-
-            server_print("[CP] Выдано $%d для %d игроков команды %s", reward, rewarded, my==2 ? "CT" : "T")
 
             new ct = 0, tt = 0
             for(new i = 0; i < g_Num; i++)
@@ -807,7 +800,7 @@ SetColor(ent, r, g, b)
 }
 
 // ============================================
-// НОВАЯ СИСТЕМА СПАВНА
+// УМНАЯ СИСТЕМА СПАВНА v2
 // ============================================
 
 public OnSpawn(id)
@@ -820,9 +813,22 @@ public OnSpawn(id)
     new TeamName:tm = get_member(id, m_iTeam)
     if(tm != TEAM_TERRORIST && tm != TEAM_CT) return
 
+    new spawnMode = get_pcvar_num(pCvarSpawnMode)
+
+    switch(spawnMode)
+    {
+        case 0: return  // Только база
+        case 1: SpawnMode_Random(id, tm)
+        case 2: SpawnMode_Smart(id, tm)
+        case 3: SpawnMode_Strategic(id, tm)
+    }
+}
+
+// Режим 1: Случайный спавн на точках (50/50)
+SpawnMode_Random(id, TeamName:tm)
+{
     new my = (tm == TEAM_CT) ? 2 : 1
 
-    // Собираем точки команды с безопасными позициями
     new teamPoints[MAX_POINTS], teamPointCount = 0
     for(new i = 0; i < g_Num; i++)
     {
@@ -830,81 +836,242 @@ public OnSpawn(id)
             teamPoints[teamPointCount++] = i
     }
 
-    // Если нет захваченных точек - остаёмся на базе
-    if(teamPointCount == 0)
-        return
+    if(teamPointCount == 0) return
 
-    // Решаем: спавн на базе или на точке?
-    new spawnBalance = get_pcvar_num(pCvarSpawnBalance)
-    new roll = random(100)
+    // 50% шанс спавна на точке
+    if(random(100) >= 50) return
 
-    if(roll >= spawnBalance)
+    new pt = teamPoints[random(teamPointCount)]
+
+    new Float:spawnPos[3]
+    if(FindFreeSpawnPosition(id, pt, spawnPos))
     {
-        // Остаёмся на базе
-        return
+        set_entvar(id, var_origin, spawnPos)
+        g_SpawnCountOnPoint[pt]++
+    }
+}
+
+// Режим 2: Умный спавн (место смерти → последняя захваченная → точки → база)
+SpawnMode_Smart(id, TeamName:tm)
+{
+    new my = (tm == TEAM_CT) ? 2 : 1
+
+    // Собираем точки команды
+    new teamPoints[MAX_POINTS], teamPointCount = 0
+    for(new i = 0; i < g_Num; i++)
+    {
+        if(g_State[i] == my && g_SafeSpawnCount[i] > 0)
+            teamPoints[teamPointCount++] = i
     }
 
-    // Выбираем точку с учётом балансировки (меньше спавнов = больше шанс)
-    new selectedPoint = SelectBalancedPoint(teamPoints, teamPointCount)
+    if(teamPointCount == 0) return
 
-    if(selectedPoint == -1)
-        return
-
-    // Ищем свободную позицию на выбранной точке
     new Float:spawnPos[3]
-    if(FindFreeSpawnPosition(id, selectedPoint, spawnPos))
+
+    // Приоритет 1: Спавн рядом с местом смерти (если есть своя точка рядом)
+    if(g_HasDeathPos[id])
+    {
+        new nearestPoint = FindNearestTeamPoint(g_DeathPos[id], my, DEATH_SPAWN_RADIUS)
+        if(nearestPoint != -1 && FindFreeSpawnPosition(id, nearestPoint, spawnPos))
+        {
+            set_entvar(id, var_origin, spawnPos)
+            g_SpawnCountOnPoint[nearestPoint]++
+            g_HasDeathPos[id] = false
+            return
+        }
+    }
+
+    // Приоритет 2: Последняя захваченная игроком точка
+    new lastCap = g_LastCapturedPoint[id]
+    if(lastCap >= 0 && lastCap < g_Num && g_State[lastCap] == my)
+    {
+        if(FindFreeSpawnPosition(id, lastCap, spawnPos))
+        {
+            set_entvar(id, var_origin, spawnPos)
+            g_SpawnCountOnPoint[lastCap]++
+            return
+        }
+    }
+
+    // Приоритет 3: Распределение по точкам с балансировкой
+    new selectedPoint = SelectLeastPopulatedPoint(teamPoints, teamPointCount)
+
+    if(selectedPoint != -1 && FindFreeSpawnPosition(id, selectedPoint, spawnPos))
     {
         set_entvar(id, var_origin, spawnPos)
         g_SpawnCountOnPoint[selectedPoint]++
     }
 }
 
-// Выбор точки с балансировкой (чем меньше спавнов, тем больше шанс)
-SelectBalancedPoint(teamPoints[], teamPointCount)
+// Режим 3: Стратегический (распределение по линии фронта)
+SpawnMode_Strategic(id, TeamName:tm)
 {
-    if(teamPointCount == 0)
-        return -1
+    new my = (tm == TEAM_CT) ? 2 : 1
+    new enemy = (my == 2) ? 1 : 2
 
-    if(teamPointCount == 1)
-        return teamPoints[0]
-
-    // Считаем общее количество спавнов
-    new totalSpawns = 0
-    for(new i = 0; i < teamPointCount; i++)
-        totalSpawns += g_SpawnCountOnPoint[teamPoints[i]] + 1  // +1 чтобы избежать деления на 0
-
-    // Инвертируем веса (меньше спавнов = больше вес)
-    new Float:weights[MAX_POINTS]
-    new Float:totalWeight = 0.0
-
-    for(new i = 0; i < teamPointCount; i++)
+    // Собираем точки команды
+    new teamPoints[MAX_POINTS], teamPointCount = 0
+    for(new i = 0; i < g_Num; i++)
     {
-        // Вес = 1 / (спавны + 1)
-        weights[i] = float(totalSpawns) / float(g_SpawnCountOnPoint[teamPoints[i]] + 1)
-        totalWeight += weights[i]
+        if(g_State[i] == my && g_SafeSpawnCount[i] > 0)
+            teamPoints[teamPointCount++] = i
     }
 
-    // Выбираем случайную точку по весам
-    new Float:roll = random_float(0.0, totalWeight)
-    new Float:cumulative = 0.0
+    if(teamPointCount == 0) return
 
-    for(new i = 0; i < teamPointCount; i++)
+    // Считаем количество точек у каждой команды
+    new myPointsTotal = 0, enemyPointsTotal = 0
+    for(new i = 0; i < g_Num; i++)
     {
-        cumulative += weights[i]
-        if(roll <= cumulative)
-            return teamPoints[i]
+        if(g_State[i] == my) myPointsTotal++
+        else if(g_State[i] == enemy) enemyPointsTotal++
     }
 
-    return teamPoints[0]
+    new Float:spawnPos[3]
+    new selectedPoint = -1
+
+    // Стратегия зависит от соотношения точек
+    if(myPointsTotal <= enemyPointsTotal)
+    {
+        // Мы проигрываем или равны - концентрируем силы на передовых точках
+        // Ищем точку ближе всего к врагу
+        selectedPoint = FindFrontlinePoint(teamPoints, teamPointCount, enemy)
+    }
+    else
+    {
+        // Мы выигрываем - распределяем равномерно для защиты
+        selectedPoint = SelectLeastPopulatedPoint(teamPoints, teamPointCount)
+    }
+
+    if(selectedPoint != -1 && FindFreeSpawnPosition(id, selectedPoint, spawnPos))
+    {
+        set_entvar(id, var_origin, spawnPos)
+        g_SpawnCountOnPoint[selectedPoint]++
+    }
 }
 
-// Поиск свободной позиции для спавна (проверка коллизий с игроками в реальном времени)
+// Найти точку команды ближайшую к позиции
+FindNearestTeamPoint(Float:pos[3], team, Float:maxRadius)
+{
+    new nearest = -1
+    new Float:nearestDist = maxRadius
+
+    for(new i = 0; i < g_Num; i++)
+    {
+        if(g_State[i] != team) continue
+        if(g_SafeSpawnCount[i] == 0) continue
+
+        new Float:dx = pos[0] - g_PosX[i]
+        new Float:dy = pos[1] - g_PosY[i]
+        new Float:dist = floatsqroot(dx*dx + dy*dy)
+
+        if(dist < nearestDist)
+        {
+            nearestDist = dist
+            nearest = i
+        }
+    }
+
+    return nearest
+}
+
+// Найти передовую точку (ближайшую к врагу)
+FindFrontlinePoint(teamPoints[], teamPointCount, enemyTeam)
+{
+    if(teamPointCount == 0) return -1
+
+    new bestPoint = teamPoints[0]
+    new Float:bestDist = 999999.0
+
+    // Находим центр вражеских точек
+    new Float:enemyCenterX = 0.0, Float:enemyCenterY = 0.0
+    new enemyCount = 0
+
+    for(new i = 0; i < g_Num; i++)
+    {
+        if(g_State[i] == enemyTeam)
+        {
+            enemyCenterX += g_PosX[i]
+            enemyCenterY += g_PosY[i]
+            enemyCount++
+        }
+    }
+
+    // Если у врага нет точек - используем вражескую базу
+    if(enemyCount == 0)
+    {
+        if(enemyTeam == 1)  // T
+        {
+            enemyCenterX = g_TBaseX
+            enemyCenterY = g_TBaseY
+        }
+        else  // CT
+        {
+            enemyCenterX = g_CTBaseX
+            enemyCenterY = g_CTBaseY
+        }
+    }
+    else
+    {
+        enemyCenterX /= float(enemyCount)
+        enemyCenterY /= float(enemyCount)
+    }
+
+    // Ищем нашу точку ближайшую к врагу
+    for(new i = 0; i < teamPointCount; i++)
+    {
+        new pt = teamPoints[i]
+        new Float:dx = g_PosX[pt] - enemyCenterX
+        new Float:dy = g_PosY[pt] - enemyCenterY
+        new Float:dist = floatsqroot(dx*dx + dy*dy)
+
+        if(dist < bestDist)
+        {
+            bestDist = dist
+            bestPoint = pt
+        }
+    }
+
+    return bestPoint
+}
+
+// Выбрать точку с наименьшим количеством спавнов
+SelectLeastPopulatedPoint(teamPoints[], teamPointCount)
+{
+    if(teamPointCount == 0) return -1
+    if(teamPointCount == 1) return teamPoints[0]
+
+    new bestPoint = teamPoints[0]
+    new bestCount = g_SpawnCountOnPoint[teamPoints[0]]
+
+    for(new i = 1; i < teamPointCount; i++)
+    {
+        new pt = teamPoints[i]
+        if(g_SpawnCountOnPoint[pt] < bestCount)
+        {
+            bestCount = g_SpawnCountOnPoint[pt]
+            bestPoint = pt
+        }
+    }
+
+    // Если несколько точек с одинаковым счётом - выбираем случайную из них
+    new candidates[MAX_POINTS], candCount = 0
+    for(new i = 0; i < teamPointCount; i++)
+    {
+        if(g_SpawnCountOnPoint[teamPoints[i]] == bestCount)
+            candidates[candCount++] = teamPoints[i]
+    }
+
+    return candidates[random(candCount)]
+}
+
+// Поиск свободной позиции
 bool:FindFreeSpawnPosition(id, pt, Float:outPos[3])
 {
     if(g_SafeSpawnCount[pt] == 0)
         return false
 
-    // Перемешиваем порядок проверки для разнообразия
+    // Перемешиваем порядок
     new order[MAX_SPAWN_POSITIONS]
     new orderCount = g_SafeSpawnCount[pt]
 
@@ -920,7 +1087,6 @@ bool:FindFreeSpawnPosition(id, pt, Float:outPos[3])
         order[j] = temp
     }
 
-    // Проверяем позиции в случайном порядке
     for(new i = 0; i < orderCount; i++)
     {
         new idx = order[i]
@@ -929,7 +1095,6 @@ bool:FindFreeSpawnPosition(id, pt, Float:outPos[3])
         pos[1] = g_SafeSpawns[pt][idx][1]
         pos[2] = g_SafeSpawns[pt][idx][2]
 
-        // Проверяем коллизии с другими игроками
         if(IsPositionFreeFromPlayers(pos, id))
         {
             outPos[0] = pos[0]
@@ -942,16 +1107,13 @@ bool:FindFreeSpawnPosition(id, pt, Float:outPos[3])
     return false
 }
 
-// Проверка что позиция свободна от других игроков
 bool:IsPositionFreeFromPlayers(Float:pos[3], excludeId)
 {
-    // Проверяем hull с учётом игроков
     engfunc(EngFunc_TraceHull, pos, pos, DONT_IGNORE_MONSTERS, HULL_HUMAN, excludeId)
 
     if(get_tr2(0, TR_StartSolid) || get_tr2(0, TR_AllSolid))
         return false
 
-    // Дополнительная проверка дистанции до игроков
     new Float:playerPos[3]
     for(new i = 1; i <= MAX_CLIENTS; i++)
     {
@@ -980,10 +1142,10 @@ public OnRound()
     {
         g_Capturing[i] = false
         g_CapEnt[i] = 0
+        g_HasDeathPos[i] = false
         remove_task(i)
     }
 
-    // Сбрасываем счётчики спавнов на точках каждый раунд
     for(new i = 0; i < g_Num; i++)
         g_SpawnCountOnPoint[i] = 0
 
@@ -1001,5 +1163,13 @@ public OnRound()
 public client_disconnected(id)
 {
     StopCapture(id)
+    g_HasDeathPos[id] = false
+    g_LastCapturedPoint[id] = -1
     remove_task(id)
+}
+
+public client_putinserver(id)
+{
+    g_HasDeathPos[id] = false
+    g_LastCapturedPoint[id] = -1
 }
