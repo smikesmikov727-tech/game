@@ -72,7 +72,7 @@ new g_Spr, g_MsgSay
 
 public plugin_precache()
 {
-    for(new i = 0; i < 3; i++)
+    for(new i = 0; i < sizeof(MODELS); i++)
         precache_model(MODELS[i])
     g_Spr = precache_model("sprites/shockwave.spr")
     precache_sound("buttons/bell1.wav")
@@ -601,7 +601,6 @@ public OnTouch(ent, id)
             new reward = get_pcvar_num(pCvarReward)
             new pls[32], n
             get_players(pls, n)
-            new rewarded = 0
 
             new bool:bCanReward = bool:lvl_can_reward()
 
@@ -613,12 +612,8 @@ public OnTouch(ent, id)
                 new pid = pls[i]
                 new TeamName:ptm = get_member(pid, m_iTeam)
 
-                if(ptm == tm)
-                {
-                    if(bCanReward)
-                        lvl_add_money(pid, reward)
-                    rewarded++
-                }
+                if(ptm == tm && bCanReward)
+                    lvl_add_money(pid, reward)
             }
 
             new ct = 0, tt = 0
@@ -635,7 +630,7 @@ public OnTouch(ent, id)
 
             if(get_pcvar_num(pCvarSound))
             {
-                for(new p = 1; p <= 32; p++)
+                for(new p = 1; p <= MAX_CLIENTS; p++)
                 {
                     if(is_user_connected(p))
                         lvl_block_sound(p, 2.0)
