@@ -34,7 +34,6 @@ enum _:SpawnData {
 
 new g_iSpawnPoints[MAX_SPAWN_POINTS][SpawnData];
 new g_iSpawnCount = 0;
-new bool:g_bPluginEnabled = true;
 
 // CVars
 new g_pCvarEnabled;
@@ -84,7 +83,7 @@ public RestartRound_Post() {
 }
 
 public Player_Spawn_Post(id) {
-    if(!is_user_alive(id) || !g_bPluginEnabled)
+    if(!is_user_alive(id) || !get_pcvar_num(g_pCvarEnabled))
         return HC_CONTINUE;
 
     if(g_iSpawnCount == 0)
@@ -201,8 +200,7 @@ bool:FindBestSpawnPoint(id, Float:outOrigin[3], Float:outAngles[3]) {
     }
 
     // Выбираем лучшую точку из валидных (с весовой случайностью)
-    new bestIdx = SelectWeightedRandom(scores, validSpawns, validCount);
-    new spawnIdx = validSpawns[bestIdx];
+    new spawnIdx = SelectWeightedRandom(scores, validSpawns, validCount);
 
     for(new i = 0; i < 3; i++) {
         outOrigin[i] = g_iSpawnPoints[spawnIdx][SPAWN_ORIGIN][i];
@@ -227,11 +225,11 @@ SelectWeightedRandom(const Float:weights[], const indices[], count) {
     for(new i = 0; i < count; i++) {
         currentWeight += weights[i];
         if(randomValue <= currentWeight) {
-            return i;
+            return indices[i];
         }
     }
 
-    return count - 1;
+    return indices[count - 1];
 }
 
 // Проверка видимости
@@ -423,7 +421,7 @@ public CmdShowSpawns(id, level, cid) {
 
     client_print(id, print_console, "=== CSDM Smart Spawn Info ===");
     client_print(id, print_console, "Всего точек спавна: %d", g_iSpawnCount);
-    client_print(id, print_console, "Плагин: %s", g_bPluginEnabled ? "Включен" : "Выключен");
+    client_print(id, print_console, "Плагин: %s", get_pcvar_num(g_pCvarEnabled) ? "Включен" : "Выключен");
     client_print(id, print_console, "Мин. расст. до игрока: %.1f", get_pcvar_float(g_pCvarMinDistPlayer));
     client_print(id, print_console, "Мин. расст. до врага: %.1f", get_pcvar_float(g_pCvarMinDistEnemy));
     client_print(id, print_console, "Время повтора: %.1f сек", get_pcvar_float(g_pCvarReuseTime));
