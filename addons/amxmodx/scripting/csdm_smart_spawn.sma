@@ -86,8 +86,10 @@ public Player_Spawn_Post(id) {
     if(!is_user_alive(id) || !get_pcvar_num(g_pCvarEnabled))
         return HC_CONTINUE;
 
-    if(g_iSpawnCount == 0)
+    if(g_iSpawnCount == 0) {
+        server_print("[CSDM DEBUG] Нет точек спавна для игрока %n", id);
         return HC_CONTINUE;
+    }
 
     // Небольшая задержка для корректного спавна
     set_task(0.1, "TaskRespawnPlayer", id);
@@ -96,21 +98,32 @@ public Player_Spawn_Post(id) {
 }
 
 public TaskRespawnPlayer(id) {
-    if(!is_user_alive(id))
+    // Удаляем предыдущую задачу если есть
+    remove_task(id);
+
+    if(!is_user_alive(id)) {
+        server_print("[CSDM DEBUG] Игрок %d не жив при телепортации", id);
         return;
+    }
 
     new Float:vOrigin[3], Float:vAngles[3];
 
     if(FindBestSpawnPoint(id, vOrigin, vAngles)) {
-        // Телепортируем игрока
-        set_entvar(id, var_origin, vOrigin);
+        server_print("[CSDM DEBUG] Телепортация игрока %d на точку (%.1f, %.1f, %.1f)",
+            id, vOrigin[0], vOrigin[1], vOrigin[2]);
+
+        // Устанавливаем новую позицию
+        engfunc(EngFunc_SetOrigin, id, vOrigin);
         set_entvar(id, var_angles, vAngles);
         set_entvar(id, var_v_angle, vAngles);
         set_entvar(id, var_fixangle, 1);
 
-        // Убираем эффект застревания
+        // Убираем velocity
         new Float:zero[3] = {0.0, 0.0, 0.0};
         set_entvar(id, var_velocity, zero);
+        set_entvar(id, var_basevelocity, zero);
+    } else {
+        server_print("[CSDM DEBUG] Не удалось найти точку спавна для игрока %d", id);
     }
 }
 
@@ -249,33 +262,37 @@ AutoGenerateSpawns() {
 
     server_print("[CSDM] Автогенерация точек спавна для карты %s...", mapName);
 
-    // Получаем существующие точки спавна из карты
+    g_iSpawnCount = 0; // Сбрасываем счетчик
     new ent = -1;
+    new countT = 0, countCT = 0, countDM = 0;
 
-    // Ищем info_player_start
-    while((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "info_player_start")) > 0) {
-        AddSpawnFromEntity(ent, 0);
+    // Ищем точки спавна T (info_player_terrorist)
+    while((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "info_player_terrorist")) > 0) {
+        AddSpawnFromEntity(ent, 0); // 0 = любая команда для CSDM
+        countT++;
     }
 
-    // Ищем info_player_deathmatch
+    // Ищем точки спавна CT (info_player_counterterrorist)
+    ent = -1;
+    while((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "info_player_counterterrorist")) > 0) {
+        AddSpawnFromEntity(ent, 0); // 0 = любая команда для CSDM
+        countCT++;
+    }
+
+    // Ищем точки DM (info_player_deathmatch)
     ent = -1;
     while((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "info_player_deathmatch")) > 0) {
         AddSpawnFromEntity(ent, 0);
+        countDM++;
     }
 
-    // Ищем точки спавна CT
-    ent = -1;
-    while((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "info_player_start")) > 0) {
-        AddSpawnFromEntity(ent, 2); // CT = 2
-    }
+    server_print("[CSDM] Найдено точек: T=%d, CT=%d, DM=%d", countT, countCT, countDM);
+    server_print("[CSDM] Всего сгенерировано %d точек спавна", g_iSpawnCount);
 
-    // Ищем точки спавна T
-    ent = -1;
-    while((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "info_player_deathmatch")) > 0) {
-        AddSpawnFromEntity(ent, 1); // T = 1
+    if(g_iSpawnCount == 0) {
+        server_print("[CSDM] ОШИБКА: Не найдено ни одной точки спавна!");
+        return;
     }
-
-    server_print("[CSDM] Сгенерировано %d точек спавна", g_iSpawnCount);
 
     // Автосохранение
     SaveSpawnsForMap();
