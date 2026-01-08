@@ -11,27 +11,20 @@
 #include <fakemeta>
 #include <engine>
 #include <hamsandwich>
-#include <xs>
 
 #define PLUGIN_NAME     "Spawn Generator"
-#define PLUGIN_VERSION  "1.0"
+#define PLUGIN_VERSION  "1.1"
 #define PLUGIN_AUTHOR   "Claude AI"
 
 #define MAX_SPAWNS      32
 #define MIN_SPAWN_DIST  128.0   // Минимальное расстояние между спавнами
-#define HULL_CHECK_Z    36.0    // Высота проверки коллизии (стоя)
-#define DUCK_HULL_Z     18.0    // Высота проверки коллизии (присев)
-#define SAFE_RADIUS     32.0    // Радиус безопасной зоны
 
-// Типы спавнов
-enum _:SpawnData {
-    Float:SPAWN_ORIGIN[3],
-    Float:SPAWN_ANGLES[3],
-    SPAWN_TEAM  // 0 = любая, 1 = CT, 2 = T
-}
-
-new g_Spawns[MAX_SPAWNS][SpawnData]
+// Отдельные массивы для данных спавнов
+new Float:g_SpawnOrigin[MAX_SPAWNS][3]
+new Float:g_SpawnAngles[MAX_SPAWNS][3]
+new g_SpawnTeam[MAX_SPAWNS]
 new g_SpawnCount
+
 new g_MapName[64]
 new g_SpawnFile[128]
 
@@ -87,6 +80,22 @@ public plugin_precache() {
     g_BeamSprite = precache_model("sprites/laserbeam.spr")
 }
 
+// Копирование вектора
+stock vec_copy(Float:src[3], Float:dst[3]) {
+    dst[0] = src[0]
+    dst[1] = src[1]
+    dst[2] = src[2]
+}
+
+// Расстояние между точками
+stock Float:vec_distance(Float:a[3], Float:b[3]) {
+    return floatsqroot(
+        (a[0]-b[0])*(a[0]-b[0]) +
+        (a[1]-b[1])*(a[1]-b[1]) +
+        (a[2]-b[2])*(a[2]-b[2])
+    )
+}
+
 /* ================== ЗАГРУЗКА/СОХРАНЕНИЕ ================== */
 
 public task_load_spawns() {
@@ -116,13 +125,13 @@ load_spawns() {
         if (parse(line, data[0], 31, data[1], 31, data[2], 31,
                   data[3], 31, data[4], 31, data[5], 31, data[6], 31) >= 6) {
 
-            g_Spawns[g_SpawnCount][SPAWN_ORIGIN][0] = str_to_float(data[0])
-            g_Spawns[g_SpawnCount][SPAWN_ORIGIN][1] = str_to_float(data[1])
-            g_Spawns[g_SpawnCount][SPAWN_ORIGIN][2] = str_to_float(data[2])
-            g_Spawns[g_SpawnCount][SPAWN_ANGLES][0] = str_to_float(data[3])
-            g_Spawns[g_SpawnCount][SPAWN_ANGLES][1] = str_to_float(data[4])
-            g_Spawns[g_SpawnCount][SPAWN_ANGLES][2] = str_to_float(data[5])
-            g_Spawns[g_SpawnCount][SPAWN_TEAM] = str_to_num(data[6])
+            g_SpawnOrigin[g_SpawnCount][0] = str_to_float(data[0])
+            g_SpawnOrigin[g_SpawnCount][1] = str_to_float(data[1])
+            g_SpawnOrigin[g_SpawnCount][2] = str_to_float(data[2])
+            g_SpawnAngles[g_SpawnCount][0] = str_to_float(data[3])
+            g_SpawnAngles[g_SpawnCount][1] = str_to_float(data[4])
+            g_SpawnAngles[g_SpawnCount][2] = str_to_float(data[5])
+            g_SpawnTeam[g_SpawnCount] = str_to_num(data[6])
 
             g_SpawnCount++
         }
@@ -146,13 +155,13 @@ save_spawns() {
 
     for (new i = 0; i < g_SpawnCount; i++) {
         fprintf(file, "%.1f %.1f %.1f %.1f %.1f %.1f %d^n",
-            g_Spawns[i][SPAWN_ORIGIN][0],
-            g_Spawns[i][SPAWN_ORIGIN][1],
-            g_Spawns[i][SPAWN_ORIGIN][2],
-            g_Spawns[i][SPAWN_ANGLES][0],
-            g_Spawns[i][SPAWN_ANGLES][1],
-            g_Spawns[i][SPAWN_ANGLES][2],
-            g_Spawns[i][SPAWN_TEAM]
+            g_SpawnOrigin[i][0],
+            g_SpawnOrigin[i][1],
+            g_SpawnOrigin[i][2],
+            g_SpawnAngles[i][0],
+            g_SpawnAngles[i][1],
+            g_SpawnAngles[i][2],
+            g_SpawnTeam[i]
         )
     }
 
@@ -170,7 +179,7 @@ bool:is_spawn_safe(Float:origin[3]) {
         return false
 
     // Проверка hull (размер игрока)
-    if (!check_hull(origin, HULL_HUMAN))
+    if (!check_hull(origin))
         return false
 
     // Проверка пространства над головой
@@ -206,9 +215,9 @@ bool:is_on_ground(Float:origin[3]) {
 }
 
 // Проверка hull коллизии
-bool:check_hull(Float:origin[3], hull) {
+bool:check_hull(Float:origin[3]) {
     new tr = create_tr2()
-    engfunc(EngFunc_TraceHull, origin, origin, DONT_IGNORE_MONSTERS, hull, 0, tr)
+    engfunc(EngFunc_TraceHull, origin, origin, DONT_IGNORE_MONSTERS, HULL_HUMAN, 0, tr)
 
     new solid
     get_tr2(tr, TR_AllSolid, solid)
@@ -241,8 +250,7 @@ bool:check_headroom(Float:origin[3]) {
 // Проверка минимального расстояния между спавнами
 bool:check_spawn_distance(Float:origin[3], Float:minDist) {
     for (new i = 0; i < g_SpawnCount; i++) {
-        new Float:dist = get_distance_f(origin, g_Spawns[i][SPAWN_ORIGIN])
-        if (dist < minDist) {
+        if (vec_distance(origin, g_SpawnOrigin[i]) < minDist) {
             return false
         }
     }
@@ -253,23 +261,30 @@ bool:check_spawn_distance(Float:origin[3], Float:minDist) {
 bool:find_safe_position(Float:origin[3], Float:safeOrigin[3]) {
     // Сначала проверяем исходную точку
     if (is_spawn_safe(origin)) {
-        xs_vec_copy(origin, safeOrigin)
+        vec_copy(origin, safeOrigin)
         return true
     }
 
     // Пробуем найти безопасную позицию рядом
     new Float:testOrigin[3]
-    new Float:offsets[] = { 0.0, 16.0, -16.0, 32.0, -32.0, 48.0, -48.0 }
+    new Float:offsets[7]
+    offsets[0] = 0.0
+    offsets[1] = 16.0
+    offsets[2] = -16.0
+    offsets[3] = 32.0
+    offsets[4] = -32.0
+    offsets[5] = 48.0
+    offsets[6] = -48.0
 
-    for (new x = 0; x < sizeof(offsets); x++) {
-        for (new y = 0; y < sizeof(offsets); y++) {
+    for (new x = 0; x < 7; x++) {
+        for (new y = 0; y < 7; y++) {
             for (new z = 0; z < 5; z++) {
                 testOrigin[0] = origin[0] + offsets[x]
                 testOrigin[1] = origin[1] + offsets[y]
                 testOrigin[2] = origin[2] + float(z * 16)
 
                 if (is_spawn_safe(testOrigin)) {
-                    xs_vec_copy(testOrigin, safeOrigin)
+                    vec_copy(testOrigin, safeOrigin)
                     return true
                 }
             }
@@ -293,7 +308,7 @@ align_to_ground(Float:origin[3]) {
     get_tr2(tr, TR_vecEndPos, endpos)
     free_tr2(tr)
 
-    origin[2] = endpos[2] + 1.0  // Немного выше земли
+    origin[2] = endpos[2] + 1.0
 }
 
 /* ================== КОМАНДЫ ================== */
@@ -381,11 +396,11 @@ public cmd_add_spawn(id, level, cid) {
     }
 
     // Добавляем спавн
-    xs_vec_copy(safeOrigin, g_Spawns[g_SpawnCount][SPAWN_ORIGIN])
-    g_Spawns[g_SpawnCount][SPAWN_ANGLES][0] = 0.0
-    g_Spawns[g_SpawnCount][SPAWN_ANGLES][1] = angles[1]
-    g_Spawns[g_SpawnCount][SPAWN_ANGLES][2] = 0.0
-    g_Spawns[g_SpawnCount][SPAWN_TEAM] = 0
+    vec_copy(safeOrigin, g_SpawnOrigin[g_SpawnCount])
+    g_SpawnAngles[g_SpawnCount][0] = 0.0
+    g_SpawnAngles[g_SpawnCount][1] = angles[1]
+    g_SpawnAngles[g_SpawnCount][2] = 0.0
+    g_SpawnTeam[g_SpawnCount] = 0
 
     g_SpawnCount++
 
@@ -411,7 +426,7 @@ public cmd_del_spawn(id, level, cid) {
     new Float:nearestDist = 9999.0
 
     for (new i = 0; i < g_SpawnCount; i++) {
-        new Float:dist = get_distance_f(origin, g_Spawns[i][SPAWN_ORIGIN])
+        new Float:dist = vec_distance(origin, g_SpawnOrigin[i])
         if (dist < nearestDist) {
             nearestDist = dist
             nearest = i
@@ -425,9 +440,9 @@ public cmd_del_spawn(id, level, cid) {
 
     // Удаляем спавн (сдвигаем массив)
     for (new i = nearest; i < g_SpawnCount - 1; i++) {
-        xs_vec_copy(g_Spawns[i+1][SPAWN_ORIGIN], g_Spawns[i][SPAWN_ORIGIN])
-        xs_vec_copy(g_Spawns[i+1][SPAWN_ANGLES], g_Spawns[i][SPAWN_ANGLES])
-        g_Spawns[i][SPAWN_TEAM] = g_Spawns[i+1][SPAWN_TEAM]
+        vec_copy(g_SpawnOrigin[i+1], g_SpawnOrigin[i])
+        vec_copy(g_SpawnAngles[i+1], g_SpawnAngles[i])
+        g_SpawnTeam[i] = g_SpawnTeam[i+1]
     }
 
     g_SpawnCount--
@@ -475,7 +490,7 @@ public cmd_show_spawns(id, level, cid) {
     }
 
     for (new i = 0; i < g_SpawnCount; i++) {
-        draw_spawn_marker(id, g_Spawns[i][SPAWN_ORIGIN], g_Spawns[i][SPAWN_TEAM])
+        draw_spawn_marker(id, g_SpawnOrigin[i], g_SpawnTeam[i])
     }
 
     client_print(id, print_chat, "[Spawns] Показано %d спавнов (5 сек)", g_SpawnCount)
@@ -494,7 +509,7 @@ public cmd_test_spawns(id, level, cid) {
     new safe = 0, unsafe = 0
 
     for (new i = 0; i < g_SpawnCount; i++) {
-        if (is_spawn_safe(g_Spawns[i][SPAWN_ORIGIN])) {
+        if (is_spawn_safe(g_SpawnOrigin[i])) {
             safe++
         } else {
             unsafe++
@@ -540,11 +555,11 @@ public cmd_auto_generate(id, level, cid) {
     for (new i = 0; i < mapSpawnCount && g_SpawnCount < MAX_SPAWNS; i++) {
         if (find_safe_position(mapSpawns[i], safeOrigin)) {
             if (check_spawn_distance(safeOrigin, MIN_SPAWN_DIST)) {
-                xs_vec_copy(safeOrigin, g_Spawns[g_SpawnCount][SPAWN_ORIGIN])
-                g_Spawns[g_SpawnCount][SPAWN_ANGLES][0] = 0.0
-                g_Spawns[g_SpawnCount][SPAWN_ANGLES][1] = random_float(0.0, 360.0)
-                g_Spawns[g_SpawnCount][SPAWN_ANGLES][2] = 0.0
-                g_Spawns[g_SpawnCount][SPAWN_TEAM] = 0
+                vec_copy(safeOrigin, g_SpawnOrigin[g_SpawnCount])
+                g_SpawnAngles[g_SpawnCount][0] = 0.0
+                g_SpawnAngles[g_SpawnCount][1] = random_float(0.0, 360.0)
+                g_SpawnAngles[g_SpawnCount][2] = 0.0
+                g_SpawnTeam[g_SpawnCount] = 0
                 g_SpawnCount++
                 generated++
             }
@@ -559,13 +574,15 @@ public cmd_auto_generate(id, level, cid) {
         attempts++
 
         // Выбираем случайный существующий спавн
-        new baseIdx = random(g_SpawnCount > 0 ? g_SpawnCount : mapSpawnCount)
+        new baseIdx
         new Float:baseOrigin[3]
 
         if (g_SpawnCount > 0) {
-            xs_vec_copy(g_Spawns[baseIdx][SPAWN_ORIGIN], baseOrigin)
+            baseIdx = random(g_SpawnCount)
+            vec_copy(g_SpawnOrigin[baseIdx], baseOrigin)
         } else if (mapSpawnCount > 0) {
-            xs_vec_copy(mapSpawns[baseIdx], baseOrigin)
+            baseIdx = random(mapSpawnCount)
+            vec_copy(mapSpawns[baseIdx], baseOrigin)
         } else {
             break
         }
@@ -585,11 +602,11 @@ public cmd_auto_generate(id, level, cid) {
         // Проверяем и добавляем
         if (find_safe_position(testOrigin, safeOrigin)) {
             if (check_spawn_distance(safeOrigin, MIN_SPAWN_DIST)) {
-                xs_vec_copy(safeOrigin, g_Spawns[g_SpawnCount][SPAWN_ORIGIN])
-                g_Spawns[g_SpawnCount][SPAWN_ANGLES][0] = 0.0
-                g_Spawns[g_SpawnCount][SPAWN_ANGLES][1] = random_float(0.0, 360.0)
-                g_Spawns[g_SpawnCount][SPAWN_ANGLES][2] = 0.0
-                g_Spawns[g_SpawnCount][SPAWN_TEAM] = 0
+                vec_copy(safeOrigin, g_SpawnOrigin[g_SpawnCount])
+                g_SpawnAngles[g_SpawnCount][0] = 0.0
+                g_SpawnAngles[g_SpawnCount][1] = random_float(0.0, 360.0)
+                g_SpawnAngles[g_SpawnCount][2] = 0.0
+                g_SpawnTeam[g_SpawnCount] = 0
                 g_SpawnCount++
                 generated++
             }
@@ -622,7 +639,7 @@ drop_to_floor_pos(Float:origin[3]) {
     get_tr2(tr, TR_vecEndPos, endpos)
     free_tr2(tr)
 
-    origin[2] = endpos[2] + 36.0  // Высота центра игрока
+    origin[2] = endpos[2] + 36.0
 }
 
 /* ================== СПАВН ИГРОКОВ ================== */
@@ -632,13 +649,13 @@ public fw_PlayerSpawn_Post(id) {
     if (g_SpawnCount == 0) return HAM_IGNORED
 
     // Выбираем случайный спавн
-    new spawn = find_free_spawn(id)
+    new spawnIdx = find_free_spawn(id)
 
-    if (spawn != -1) {
+    if (spawnIdx != -1) {
         // Телепортируем игрока
-        set_pev(id, pev_origin, g_Spawns[spawn][SPAWN_ORIGIN])
-        set_pev(id, pev_angles, g_Spawns[spawn][SPAWN_ANGLES])
-        set_pev(id, pev_v_angle, g_Spawns[spawn][SPAWN_ANGLES])
+        set_pev(id, pev_origin, g_SpawnOrigin[spawnIdx])
+        set_pev(id, pev_angles, g_SpawnAngles[spawnIdx])
+        set_pev(id, pev_v_angle, g_SpawnAngles[spawnIdx])
         set_pev(id, pev_fixangle, 1)
         set_pev(id, pev_velocity, Float:{0.0, 0.0, 0.0})
     }
@@ -654,7 +671,7 @@ find_free_spawn(id) {
 
     // Собираем подходящие спавны
     for (new i = 0; i < g_SpawnCount; i++) {
-        if (g_Spawns[i][SPAWN_TEAM] == 0 || g_Spawns[i][SPAWN_TEAM] == team) {
+        if (g_SpawnTeam[i] == 0 || g_SpawnTeam[i] == team) {
             tries[tryCount++] = i
         }
     }
@@ -671,9 +688,9 @@ find_free_spawn(id) {
 
     // Ищем свободный (без других игроков рядом)
     for (new i = 0; i < tryCount; i++) {
-        new spawn = tries[i]
-        if (is_spawn_free(g_Spawns[spawn][SPAWN_ORIGIN], id)) {
-            return spawn
+        new spawnIdx = tries[i]
+        if (is_spawn_free(g_SpawnOrigin[spawnIdx], id)) {
+            return spawnIdx
         }
     }
 
@@ -690,7 +707,7 @@ bool:is_spawn_free(Float:origin[3], exceptId) {
         new Float:playerOrigin[3]
         pev(i, pev_origin, playerOrigin)
 
-        if (get_distance_f(origin, playerOrigin) < 64.0) {
+        if (vec_distance(origin, playerOrigin) < 64.0) {
             return false
         }
     }
@@ -702,8 +719,8 @@ bool:is_spawn_free(Float:origin[3], exceptId) {
 draw_spawn_marker(id, Float:origin[3], team) {
     new Float:start[3], Float:end[3]
 
-    xs_vec_copy(origin, start)
-    xs_vec_copy(origin, end)
+    vec_copy(origin, start)
+    vec_copy(origin, end)
 
     start[2] -= 20.0
     end[2] += 60.0
