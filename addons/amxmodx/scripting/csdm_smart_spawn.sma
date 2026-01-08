@@ -110,7 +110,8 @@ public TaskRespawnPlayer(id) {
         set_entvar(id, var_fixangle, 1);
 
         // Убираем эффект застревания
-        set_entvar(id, var_velocity, Float:{0.0, 0.0, 0.0});
+        new Float:zero[3] = {0.0, 0.0, 0.0};
+        set_entvar(id, var_velocity, zero);
     }
 }
 
@@ -146,6 +147,11 @@ bool:FindBestSpawnPoint(id, Float:outOrigin[3], Float:outAngles[3]) {
         new Float:minDistPlayer = get_pcvar_float(g_pCvarMinDistPlayer);
         new Float:minDistEnemy = get_pcvar_float(g_pCvarMinDistEnemy);
 
+        new Float:spawnPos[3];
+        spawnPos[0] = g_iSpawnPoints[i][SPAWN_ORIGIN][0];
+        spawnPos[1] = g_iSpawnPoints[i][SPAWN_ORIGIN][1];
+        spawnPos[2] = g_iSpawnPoints[i][SPAWN_ORIGIN][2];
+
         for(new p = 1; p <= MaxClients; p++) {
             if(!is_user_alive(p) || p == id)
                 continue;
@@ -153,7 +159,7 @@ bool:FindBestSpawnPoint(id, Float:outOrigin[3], Float:outAngles[3]) {
             new Float:pOrigin[3];
             get_entvar(p, var_origin, pOrigin);
 
-            new Float:distance = vector_distance(g_iSpawnPoints[i][SPAWN_ORIGIN], pOrigin);
+            new Float:distance = vector_distance(spawnPos, pOrigin);
             new TeamName:pTeam = get_member(p, m_iTeam);
 
             // Враги
@@ -162,7 +168,7 @@ bool:FindBestSpawnPoint(id, Float:outOrigin[3], Float:outAngles[3]) {
                     score -= (minDistEnemy - distance) / 10.0;
 
                     // Дополнительный штраф если враг видит точку спавна
-                    if(IsVisible(g_iSpawnPoints[i][SPAWN_ORIGIN], pOrigin)) {
+                    if(IsVisible(spawnPos, pOrigin)) {
                         score -= 50.0;
                     }
                 }
@@ -186,12 +192,10 @@ bool:FindBestSpawnPoint(id, Float:outOrigin[3], Float:outAngles[3]) {
     // Если нет валидных точек - берем любую
     if(validCount == 0) {
         new spawnIdx = random(g_iSpawnCount);
-        outOrigin[0] = g_iSpawnPoints[spawnIdx][SPAWN_ORIGIN][0];
-        outOrigin[1] = g_iSpawnPoints[spawnIdx][SPAWN_ORIGIN][1];
-        outOrigin[2] = g_iSpawnPoints[spawnIdx][SPAWN_ORIGIN][2];
-        outAngles[0] = g_iSpawnPoints[spawnIdx][SPAWN_ANGLES][0];
-        outAngles[1] = g_iSpawnPoints[spawnIdx][SPAWN_ANGLES][1];
-        outAngles[2] = g_iSpawnPoints[spawnIdx][SPAWN_ANGLES][2];
+        for(new i = 0; i < 3; i++) {
+            outOrigin[i] = g_iSpawnPoints[spawnIdx][SPAWN_ORIGIN][i];
+            outAngles[i] = g_iSpawnPoints[spawnIdx][SPAWN_ANGLES][i];
+        }
         g_iSpawnPoints[spawnIdx][SPAWN_LAST_USED] = fCurrentTime;
         return true;
     }
@@ -200,12 +204,10 @@ bool:FindBestSpawnPoint(id, Float:outOrigin[3], Float:outAngles[3]) {
     new bestIdx = SelectWeightedRandom(scores, validSpawns, validCount);
     new spawnIdx = validSpawns[bestIdx];
 
-    outOrigin[0] = g_iSpawnPoints[spawnIdx][SPAWN_ORIGIN][0];
-    outOrigin[1] = g_iSpawnPoints[spawnIdx][SPAWN_ORIGIN][1];
-    outOrigin[2] = g_iSpawnPoints[spawnIdx][SPAWN_ORIGIN][2];
-    outAngles[0] = g_iSpawnPoints[spawnIdx][SPAWN_ANGLES][0];
-    outAngles[1] = g_iSpawnPoints[spawnIdx][SPAWN_ANGLES][1];
-    outAngles[2] = g_iSpawnPoints[spawnIdx][SPAWN_ANGLES][2];
+    for(new i = 0; i < 3; i++) {
+        outOrigin[i] = g_iSpawnPoints[spawnIdx][SPAWN_ORIGIN][i];
+        outAngles[i] = g_iSpawnPoints[spawnIdx][SPAWN_ANGLES][i];
+    }
 
     g_iSpawnPoints[spawnIdx][SPAWN_LAST_USED] = fCurrentTime;
 
@@ -265,13 +267,13 @@ AutoGenerateSpawns() {
 
     // Ищем точки спавна CT
     ent = -1;
-    while((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "info_player_ctsoldier")) > 0) {
+    while((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "info_player_start")) > 0) {
         AddSpawnFromEntity(ent, 2); // CT = 2
     }
 
     // Ищем точки спавна T
     ent = -1;
-    while((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "info_player_terrorist")) > 0) {
+    while((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "info_player_deathmatch")) > 0) {
         AddSpawnFromEntity(ent, 1); // T = 1
     }
 
@@ -290,12 +292,10 @@ AddSpawnFromEntity(ent, team) {
     get_entvar(ent, var_origin, origin);
     get_entvar(ent, var_angles, angles);
 
-    g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][0] = origin[0];
-    g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][1] = origin[1];
-    g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][2] = origin[2];
-    g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][0] = angles[0];
-    g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][1] = angles[1];
-    g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][2] = angles[2];
+    for(new i = 0; i < 3; i++) {
+        g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][i] = origin[i];
+        g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][i] = angles[i];
+    }
     g_iSpawnPoints[g_iSpawnCount][SPAWN_TEAM] = team;
     g_iSpawnPoints[g_iSpawnCount][SPAWN_LAST_USED] = 0.0;
 
@@ -304,8 +304,10 @@ AddSpawnFromEntity(ent, team) {
 
 // Команды
 public CmdAddSpawn(id, level, cid) {
-    if(!cmd_access(id, level, cid, 1))
+    if(!(get_user_flags(id) & ADMIN_MAP)) {
+        client_print(id, print_console, "У вас нет доступа к этой команде");
         return PLUGIN_HANDLED;
+    }
 
     if(g_iSpawnCount >= MAX_SPAWN_POINTS) {
         client_print(id, print_chat, "[CSDM] Достигнут лимит точек спавна (%d)", MAX_SPAWN_POINTS);
@@ -316,12 +318,10 @@ public CmdAddSpawn(id, level, cid) {
     get_entvar(id, var_origin, origin);
     get_entvar(id, var_angles, angles);
 
-    g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][0] = origin[0];
-    g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][1] = origin[1];
-    g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][2] = origin[2];
-    g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][0] = angles[0];
-    g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][1] = angles[1];
-    g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][2] = angles[2];
+    for(new i = 0; i < 3; i++) {
+        g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][i] = origin[i];
+        g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][i] = angles[i];
+    }
     g_iSpawnPoints[g_iSpawnCount][SPAWN_TEAM] = 0;
     g_iSpawnPoints[g_iSpawnCount][SPAWN_LAST_USED] = 0.0;
 
@@ -333,8 +333,10 @@ public CmdAddSpawn(id, level, cid) {
 }
 
 public CmdDelSpawn(id, level, cid) {
-    if(!cmd_access(id, level, cid, 1))
+    if(!(get_user_flags(id) & ADMIN_MAP)) {
+        client_print(id, print_console, "У вас нет доступа к этой команде");
         return PLUGIN_HANDLED;
+    }
 
     if(g_iSpawnCount == 0) {
         client_print(id, print_chat, "[CSDM] Нет точек спавна для удаления");
@@ -348,7 +350,11 @@ public CmdDelSpawn(id, level, cid) {
     new Float:closestDist = 999999.0;
 
     for(new i = 0; i < g_iSpawnCount; i++) {
-        new Float:dist = vector_distance(origin, g_iSpawnPoints[i][SPAWN_ORIGIN]);
+        new Float:spawnPos[3];
+        for(new j = 0; j < 3; j++) {
+            spawnPos[j] = g_iSpawnPoints[i][SPAWN_ORIGIN][j];
+        }
+        new Float:dist = vector_distance(origin, spawnPos);
         if(dist < closestDist) {
             closestDist = dist;
             closest = i;
@@ -358,7 +364,12 @@ public CmdDelSpawn(id, level, cid) {
     if(closest != -1) {
         // Сдвигаем массив
         for(new i = closest; i < g_iSpawnCount - 1; i++) {
-            g_iSpawnPoints[i] = g_iSpawnPoints[i + 1];
+            for(new j = 0; j < 3; j++) {
+                g_iSpawnPoints[i][SPAWN_ORIGIN][j] = g_iSpawnPoints[i + 1][SPAWN_ORIGIN][j];
+                g_iSpawnPoints[i][SPAWN_ANGLES][j] = g_iSpawnPoints[i + 1][SPAWN_ANGLES][j];
+            }
+            g_iSpawnPoints[i][SPAWN_TEAM] = g_iSpawnPoints[i + 1][SPAWN_TEAM];
+            g_iSpawnPoints[i][SPAWN_LAST_USED] = g_iSpawnPoints[i + 1][SPAWN_LAST_USED];
         }
         g_iSpawnCount--;
 
@@ -369,8 +380,10 @@ public CmdDelSpawn(id, level, cid) {
 }
 
 public CmdSaveSpawns(id, level, cid) {
-    if(!cmd_access(id, level, cid, 1))
+    if(!(get_user_flags(id) & ADMIN_MAP)) {
+        client_print(id, print_console, "У вас нет доступа к этой команде");
         return PLUGIN_HANDLED;
+    }
 
     SaveSpawnsForMap();
     client_print(id, print_chat, "[CSDM] Точки спавна сохранены (%d)", g_iSpawnCount);
@@ -379,8 +392,10 @@ public CmdSaveSpawns(id, level, cid) {
 }
 
 public CmdLoadSpawns(id, level, cid) {
-    if(!cmd_access(id, level, cid, 1))
+    if(!(get_user_flags(id) & ADMIN_MAP)) {
+        client_print(id, print_console, "У вас нет доступа к этой команде");
         return PLUGIN_HANDLED;
+    }
 
     LoadSpawnsForMap();
     client_print(id, print_chat, "[CSDM] Точки спавна загружены (%d)", g_iSpawnCount);
@@ -389,8 +404,10 @@ public CmdLoadSpawns(id, level, cid) {
 }
 
 public CmdClearSpawns(id, level, cid) {
-    if(!cmd_access(id, level, cid, 1))
+    if(!(get_user_flags(id) & ADMIN_MAP)) {
+        client_print(id, print_console, "У вас нет доступа к этой команде");
         return PLUGIN_HANDLED;
+    }
 
     g_iSpawnCount = 0;
     client_print(id, print_chat, "[CSDM] Все точки спавна очищены");
@@ -399,8 +416,10 @@ public CmdClearSpawns(id, level, cid) {
 }
 
 public CmdShowSpawns(id, level, cid) {
-    if(!cmd_access(id, level, cid, 1))
+    if(!(get_user_flags(id) & ADMIN_MAP)) {
+        client_print(id, print_console, "У вас нет доступа к этой команде");
         return PLUGIN_HANDLED;
+    }
 
     client_print(id, print_console, "=== CSDM Smart Spawn Info ===");
     client_print(id, print_console, "Всего точек спавна: %d", g_iSpawnCount);
@@ -492,20 +511,26 @@ LoadSpawnsForMap() {
         if(buffer[0] == ';' || buffer[0] == '/' || buffer[0] == EOS)
             continue;
 
-        new Float:ox, Float:oy, Float:oz, Float:ax, Float:ay, Float:az, team;
+        new szOriginX[16], szOriginY[16], szOriginZ[16];
+        new szAngleX[16], szAngleY[16], szAngleZ[16];
+        new szTeam[4];
 
         if(parse(buffer,
-            ox, oy, oz,
-            ax, ay, az,
-            team) >= 6) {
+            szOriginX, charsmax(szOriginX),
+            szOriginY, charsmax(szOriginY),
+            szOriginZ, charsmax(szOriginZ),
+            szAngleX, charsmax(szAngleX),
+            szAngleY, charsmax(szAngleY),
+            szAngleZ, charsmax(szAngleZ),
+            szTeam, charsmax(szTeam)) >= 6) {
 
-            g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][0] = ox;
-            g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][1] = oy;
-            g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][2] = oz;
-            g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][0] = ax;
-            g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][1] = ay;
-            g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][2] = az;
-            g_iSpawnPoints[g_iSpawnCount][SPAWN_TEAM] = team;
+            g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][0] = str_to_float(szOriginX);
+            g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][1] = str_to_float(szOriginY);
+            g_iSpawnPoints[g_iSpawnCount][SPAWN_ORIGIN][2] = str_to_float(szOriginZ);
+            g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][0] = str_to_float(szAngleX);
+            g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][1] = str_to_float(szAngleY);
+            g_iSpawnPoints[g_iSpawnCount][SPAWN_ANGLES][2] = str_to_float(szAngleZ);
+            g_iSpawnPoints[g_iSpawnCount][SPAWN_TEAM] = str_to_num(szTeam);
             g_iSpawnPoints[g_iSpawnCount][SPAWN_LAST_USED] = 0.0;
 
             g_iSpawnCount++;
@@ -514,20 +539,4 @@ LoadSpawnsForMap() {
 
     fclose(file);
     server_print("[CSDM] Загружено %d точек спавна из %s", g_iSpawnCount, filePath);
-}
-
-// Вспомогательные функции
-stock Float:parse(const string[], &Float:arg1, &Float:arg2, &Float:arg3, &Float:arg4, &Float:arg5, &Float:arg6, &arg7) {
-    new s[7][32];
-    new count = argparse(string, 7, s[0], 31, s[1], 31, s[2], 31, s[3], 31, s[4], 31, s[5], 31, s[6], 31);
-
-    if(count >= 1) arg1 = str_to_float(s[0]);
-    if(count >= 2) arg2 = str_to_float(s[1]);
-    if(count >= 3) arg3 = str_to_float(s[2]);
-    if(count >= 4) arg4 = str_to_float(s[3]);
-    if(count >= 5) arg5 = str_to_float(s[4]);
-    if(count >= 6) arg6 = str_to_float(s[5]);
-    if(count >= 7) arg7 = str_to_num(s[6]);
-
-    return count;
 }
