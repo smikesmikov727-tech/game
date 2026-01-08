@@ -3,7 +3,6 @@
  * AMX Mod X 1.9.0
  *
  * Генерация 32 безопасных точек спавна без застреваний
- * Автор: Claude AI
  */
 
 #include <amxmodx>
@@ -13,13 +12,12 @@
 #include <hamsandwich>
 
 #define PLUGIN_NAME     "Spawn Generator"
-#define PLUGIN_VERSION  "1.2"
+#define PLUGIN_VERSION  "1.3"
 #define PLUGIN_AUTHOR   "Claude AI"
 
 #define MAX_SPAWNS      32
 #define MIN_SPAWN_DIST  128.0
 
-// Данные спавнов (плоские массивы)
 new Float:g_SpawnX[MAX_SPAWNS]
 new Float:g_SpawnY[MAX_SPAWNS]
 new Float:g_SpawnZ[MAX_SPAWNS]
@@ -30,6 +28,9 @@ new g_SpawnCount
 new g_MapName[64]
 new g_SpawnFile[128]
 new g_BeamSprite
+
+// Временные переменные для возврата значений
+new Float:g_TempX, Float:g_TempY, Float:g_TempZ
 
 public plugin_init() {
     register_plugin(PLUGIN_NAME, PLUGIN_VERSION, PLUGIN_AUTHOR)
@@ -64,12 +65,9 @@ public plugin_precache() {
     g_BeamSprite = precache_model("sprites/laserbeam.spr")
 }
 
-// Расстояние между двумя точками
 stock Float:get_dist(Float:x1, Float:y1, Float:z1, Float:x2, Float:y2, Float:z2) {
     return floatsqroot((x1-x2)*(x1-x2) + (y1-y2)*(y1-y2) + (z1-z2)*(z1-z2))
 }
-
-/* ================== ЗАГРУЗКА/СОХРАНЕНИЕ ================== */
 
 public task_load_spawns() {
     load_spawns()
@@ -134,49 +132,46 @@ save_spawns() {
     return 1
 }
 
-/* ================== ПРОВЕРКА БЕЗОПАСНОСТИ ================== */
-
 bool:is_spawn_safe(Float:x, Float:y, Float:z) {
-    new Float:origin[3]
-    origin[0] = x
-    origin[1] = y
-    origin[2] = z
+    new Float:start[3], Float:end[3]
+    start[0] = x
+    start[1] = y
+    start[2] = z
 
-    // Проверка на земле
-    new Float:end[3]
+    // Ground check
     end[0] = x
     end[1] = y
     end[2] = z - 64.0
 
     new tr = create_tr2()
-    engfunc(EngFunc_TraceLine, origin, end, IGNORE_MONSTERS, 0, tr)
+    engfunc(EngFunc_TraceLine, start, end, IGNORE_MONSTERS, 0, tr)
     new Float:fraction
     get_tr2(tr, TR_flFraction, fraction)
     free_tr2(tr)
 
-    if (fraction >= 1.0) return false // Не на земле
+    if (fraction >= 1.0) return false
 
     // Hull check
     tr = create_tr2()
-    engfunc(EngFunc_TraceHull, origin, origin, DONT_IGNORE_MONSTERS, HULL_HUMAN, 0, tr)
+    engfunc(EngFunc_TraceHull, start, start, DONT_IGNORE_MONSTERS, HULL_HUMAN, 0, tr)
     new solid, startsolid
     get_tr2(tr, TR_AllSolid, solid)
     get_tr2(tr, TR_StartSolid, startsolid)
     free_tr2(tr)
 
-    if (solid || startsolid) return false // Застрял
+    if (solid || startsolid) return false
 
     // Headroom check
     end[2] = z + 72.0
     tr = create_tr2()
-    engfunc(EngFunc_TraceLine, origin, end, IGNORE_MONSTERS, 0, tr)
+    engfunc(EngFunc_TraceLine, start, end, IGNORE_MONSTERS, 0, tr)
     get_tr2(tr, TR_flFraction, fraction)
     free_tr2(tr)
 
-    if (fraction < 1.0) return false // Нет места над головой
+    if (fraction < 1.0) return false
 
     // Water/solid check
-    new contents = point_contents(origin)
+    new contents = point_contents(start)
     if (contents == CONTENTS_WATER || contents == CONTENTS_SOLID)
         return false
 
@@ -192,34 +187,35 @@ bool:check_spawn_distance(Float:x, Float:y, Float:z, Float:minDist) {
     return true
 }
 
-bool:find_safe_position(Float:inX, Float:inY, Float:inZ, &Float:outX, &Float:outY, &Float:outZ) {
+// Возвращает результат в g_TempX, g_TempY, g_TempZ
+bool:find_safe_position(Float:inX, Float:inY, Float:inZ) {
     if (is_spawn_safe(inX, inY, inZ)) {
-        outX = inX
-        outY = inY
-        outZ = inZ
+        g_TempX = inX
+        g_TempY = inY
+        g_TempZ = inZ
         return true
     }
 
-    new Float:offsets[7]
-    offsets[0] = 0.0
-    offsets[1] = 16.0
-    offsets[2] = -16.0
-    offsets[3] = 32.0
-    offsets[4] = -32.0
-    offsets[5] = 48.0
-    offsets[6] = -48.0
+    new Float:off[7]
+    off[0] = 0.0
+    off[1] = 16.0
+    off[2] = -16.0
+    off[3] = 32.0
+    off[4] = -32.0
+    off[5] = 48.0
+    off[6] = -48.0
 
     for (new ox = 0; ox < 7; ox++) {
         for (new oy = 0; oy < 7; oy++) {
             for (new oz = 0; oz < 5; oz++) {
-                new Float:tx = inX + offsets[ox]
-                new Float:ty = inY + offsets[oy]
+                new Float:tx = inX + off[ox]
+                new Float:ty = inY + off[oy]
                 new Float:tz = inZ + float(oz * 16)
 
                 if (is_spawn_safe(tx, ty, tz)) {
-                    outX = tx
-                    outY = ty
-                    outZ = tz
+                    g_TempX = tx
+                    g_TempY = ty
+                    g_TempZ = tz
                     return true
                 }
             }
@@ -229,26 +225,23 @@ bool:find_safe_position(Float:inX, Float:inY, Float:inZ, &Float:outX, &Float:out
     return false
 }
 
-drop_to_floor(&Float:x, &Float:y, &Float:z) {
-    new Float:origin[3], Float:end[3]
-    origin[0] = x
-    origin[1] = y
-    origin[2] = z
+// Возвращает Z в g_TempZ
+drop_to_floor(Float:x, Float:y, Float:z) {
+    new Float:start[3], Float:end[3], Float:endpos[3]
+    start[0] = x
+    start[1] = y
+    start[2] = z
     end[0] = x
     end[1] = y
     end[2] = z - 1000.0
 
     new tr = create_tr2()
-    engfunc(EngFunc_TraceLine, origin, end, IGNORE_MONSTERS, 0, tr)
-
-    new Float:endpos[3]
+    engfunc(EngFunc_TraceLine, start, end, IGNORE_MONSTERS, 0, tr)
     get_tr2(tr, TR_vecEndPos, endpos)
     free_tr2(tr)
 
-    z = endpos[2] + 36.0
+    g_TempZ = endpos[2] + 36.0
 }
-
-/* ================== МЕНЮ ================== */
 
 public cmd_spawn_menu(id, level, cid) {
     if (!cmd_access(id, level, cid, 1)) return PLUGIN_HANDLED
@@ -292,8 +285,6 @@ public menu_handler(id, menu, item) {
     return PLUGIN_HANDLED
 }
 
-/* ================== КОМАНДЫ ================== */
-
 public cmd_add_spawn(id, level, cid) {
     if (!cmd_access(id, level, cid, 1)) return PLUGIN_HANDLED
 
@@ -306,27 +297,26 @@ public cmd_add_spawn(id, level, cid) {
     pev(id, pev_origin, origin)
     pev(id, pev_v_angle, angles)
 
-    new Float:safeX, Float:safeY, Float:safeZ
-    if (!find_safe_position(origin[0], origin[1], origin[2], safeX, safeY, safeZ)) {
+    if (!find_safe_position(origin[0], origin[1], origin[2])) {
         client_print(id, print_chat, "[Spawns] Позиция небезопасна!")
         return PLUGIN_HANDLED
     }
 
-    if (!check_spawn_distance(safeX, safeY, safeZ, MIN_SPAWN_DIST)) {
+    if (!check_spawn_distance(g_TempX, g_TempY, g_TempZ, MIN_SPAWN_DIST)) {
         client_print(id, print_chat, "[Spawns] Слишком близко к другому спавну!")
         return PLUGIN_HANDLED
     }
 
-    g_SpawnX[g_SpawnCount] = safeX
-    g_SpawnY[g_SpawnCount] = safeY
-    g_SpawnZ[g_SpawnCount] = safeZ
+    g_SpawnX[g_SpawnCount] = g_TempX
+    g_SpawnY[g_SpawnCount] = g_TempY
+    g_SpawnZ[g_SpawnCount] = g_TempZ
     g_SpawnYaw[g_SpawnCount] = angles[1]
     g_SpawnTeam[g_SpawnCount] = 0
 
     g_SpawnCount++
 
     client_print(id, print_chat, "[Spawns] Спавн #%d добавлен", g_SpawnCount)
-    draw_spawn_marker(id, safeX, safeY, safeZ, 0)
+    draw_spawn_marker(id, g_TempX, g_TempY, g_TempZ, 0)
 
     return PLUGIN_HANDLED
 }
@@ -449,41 +439,38 @@ public cmd_auto_generate(id, level, cid) {
 
     client_print(id, print_chat, "[Spawns] Генерация...")
 
-    // Собираем спавны карты
     new Float:mapX[64], Float:mapY[64], Float:mapZ[64]
     new mapCount = 0
 
     new ent = -1
     while ((ent = find_ent_by_class(ent, "info_player_start")) != 0 && mapCount < 64) {
-        new Float:origin[3]
-        pev(ent, pev_origin, origin)
-        mapX[mapCount] = origin[0]
-        mapY[mapCount] = origin[1]
-        mapZ[mapCount] = origin[2]
+        new Float:org[3]
+        pev(ent, pev_origin, org)
+        mapX[mapCount] = org[0]
+        mapY[mapCount] = org[1]
+        mapZ[mapCount] = org[2]
         mapCount++
     }
 
     ent = -1
     while ((ent = find_ent_by_class(ent, "info_player_deathmatch")) != 0 && mapCount < 64) {
-        new Float:origin[3]
-        pev(ent, pev_origin, origin)
-        mapX[mapCount] = origin[0]
-        mapY[mapCount] = origin[1]
-        mapZ[mapCount] = origin[2]
+        new Float:org[3]
+        pev(ent, pev_origin, org)
+        mapX[mapCount] = org[0]
+        mapY[mapCount] = org[1]
+        mapZ[mapCount] = org[2]
         mapCount++
     }
 
     g_SpawnCount = 0
     new generated = 0
-    new Float:safeX, Float:safeY, Float:safeZ
 
-    // Добавляем стандартные спавны
     for (new i = 0; i < mapCount && g_SpawnCount < MAX_SPAWNS; i++) {
-        if (find_safe_position(mapX[i], mapY[i], mapZ[i], safeX, safeY, safeZ)) {
-            if (check_spawn_distance(safeX, safeY, safeZ, MIN_SPAWN_DIST)) {
-                g_SpawnX[g_SpawnCount] = safeX
-                g_SpawnY[g_SpawnCount] = safeY
-                g_SpawnZ[g_SpawnCount] = safeZ
+        if (find_safe_position(mapX[i], mapY[i], mapZ[i])) {
+            if (check_spawn_distance(g_TempX, g_TempY, g_TempZ, MIN_SPAWN_DIST)) {
+                g_SpawnX[g_SpawnCount] = g_TempX
+                g_SpawnY[g_SpawnCount] = g_TempY
+                g_SpawnZ[g_SpawnCount] = g_TempZ
                 g_SpawnYaw[g_SpawnCount] = random_float(0.0, 360.0)
                 g_SpawnTeam[g_SpawnCount] = 0
                 g_SpawnCount++
@@ -492,7 +479,6 @@ public cmd_auto_generate(id, level, cid) {
         }
     }
 
-    // Генерируем дополнительные
     new attempts = 0
     while (g_SpawnCount < MAX_SPAWNS && attempts < 5000) {
         attempts++
@@ -513,20 +499,20 @@ public cmd_auto_generate(id, level, cid) {
             break
         }
 
-        new Float:angle = random_float(0.0, 360.0)
-        new Float:dist = random_float(MIN_SPAWN_DIST, MIN_SPAWN_DIST * 4)
+        new Float:ang = random_float(0.0, 360.0)
+        new Float:dst = random_float(MIN_SPAWN_DIST, MIN_SPAWN_DIST * 4)
 
-        new Float:testX = baseX + floatcos(angle, degrees) * dist
-        new Float:testY = baseY + floatsin(angle, degrees) * dist
-        new Float:testZ = baseZ
+        new Float:testX = baseX + floatcos(ang, degrees) * dst
+        new Float:testY = baseY + floatsin(ang, degrees) * dst
 
-        drop_to_floor(testX, testY, testZ)
+        drop_to_floor(testX, testY, baseZ)
+        new Float:testZ = g_TempZ
 
-        if (find_safe_position(testX, testY, testZ, safeX, safeY, safeZ)) {
-            if (check_spawn_distance(safeX, safeY, safeZ, MIN_SPAWN_DIST)) {
-                g_SpawnX[g_SpawnCount] = safeX
-                g_SpawnY[g_SpawnCount] = safeY
-                g_SpawnZ[g_SpawnCount] = safeZ
+        if (find_safe_position(testX, testY, testZ)) {
+            if (check_spawn_distance(g_TempX, g_TempY, g_TempZ, MIN_SPAWN_DIST)) {
+                g_SpawnX[g_SpawnCount] = g_TempX
+                g_SpawnY[g_SpawnCount] = g_TempY
+                g_SpawnZ[g_SpawnCount] = g_TempZ
                 g_SpawnYaw[g_SpawnCount] = random_float(0.0, 360.0)
                 g_SpawnTeam[g_SpawnCount] = 0
                 g_SpawnCount++
@@ -546,8 +532,6 @@ public cmd_auto_generate(id, level, cid) {
     return PLUGIN_HANDLED
 }
 
-/* ================== СПАВН ИГРОКОВ ================== */
-
 public fw_PlayerSpawn_Post(id) {
     if (!is_user_alive(id)) return HAM_IGNORED
     if (g_SpawnCount == 0) return HAM_IGNORED
@@ -555,19 +539,24 @@ public fw_PlayerSpawn_Post(id) {
     new spawnIdx = find_free_spawn(id)
 
     if (spawnIdx != -1) {
-        new Float:origin[3], Float:angles[3]
-        origin[0] = g_SpawnX[spawnIdx]
-        origin[1] = g_SpawnY[spawnIdx]
-        origin[2] = g_SpawnZ[spawnIdx]
-        angles[0] = 0.0
-        angles[1] = g_SpawnYaw[spawnIdx]
-        angles[2] = 0.0
+        new Float:org[3], Float:ang[3]
+        org[0] = g_SpawnX[spawnIdx]
+        org[1] = g_SpawnY[spawnIdx]
+        org[2] = g_SpawnZ[spawnIdx]
+        ang[0] = 0.0
+        ang[1] = g_SpawnYaw[spawnIdx]
+        ang[2] = 0.0
 
-        set_pev(id, pev_origin, origin)
-        set_pev(id, pev_angles, angles)
-        set_pev(id, pev_v_angle, angles)
+        set_pev(id, pev_origin, org)
+        set_pev(id, pev_angles, ang)
+        set_pev(id, pev_v_angle, ang)
         set_pev(id, pev_fixangle, 1)
-        set_pev(id, pev_velocity, Float:{0.0, 0.0, 0.0})
+
+        new Float:vel[3]
+        vel[0] = 0.0
+        vel[1] = 0.0
+        vel[2] = 0.0
+        set_pev(id, pev_velocity, vel)
     }
 
     return HAM_IGNORED
@@ -586,7 +575,6 @@ find_free_spawn(id) {
 
     if (tryCount == 0) return -1
 
-    // Shuffle
     for (new i = tryCount - 1; i > 0; i--) {
         new j = random(i + 1)
         new temp = tries[i]
@@ -594,8 +582,7 @@ find_free_spawn(id) {
         tries[j] = temp
     }
 
-    // Find free
-    new Float:playerOrigin[3]
+    new Float:porg[3]
     for (new i = 0; i < tryCount; i++) {
         new idx = tries[i]
         new bool:isFree = true
@@ -603,9 +590,9 @@ find_free_spawn(id) {
         for (new p = 1; p <= MaxClients; p++) {
             if (p == id || !is_user_alive(p)) continue
 
-            pev(p, pev_origin, playerOrigin)
+            pev(p, pev_origin, porg)
             if (get_dist(g_SpawnX[idx], g_SpawnY[idx], g_SpawnZ[idx],
-                        playerOrigin[0], playerOrigin[1], playerOrigin[2]) < 64.0) {
+                        porg[0], porg[1], porg[2]) < 64.0) {
                 isFree = false
                 break
             }
@@ -617,17 +604,14 @@ find_free_spawn(id) {
     return tries[random(tryCount)]
 }
 
-/* ================== ВИЗУАЛИЗАЦИЯ ================== */
-
 draw_spawn_marker(id, Float:x, Float:y, Float:z, team) {
     new r, g, b
     switch (team) {
-        case 0: { r = 0; g = 255; b = 0; }   // Green
-        case 1: { r = 0; g = 0; b = 255; }   // Blue CT
-        case 2: { r = 255; g = 0; b = 0; }   // Red T
+        case 0: { r = 0; g = 255; b = 0; }
+        case 1: { r = 0; g = 0; b = 255; }
+        case 2: { r = 255; g = 0; b = 0; }
     }
 
-    // Vertical line
     message_begin(MSG_ONE, SVC_TEMPENTITY, _, id)
     write_byte(TE_BEAMPOINTS)
     engfunc(EngFunc_WriteCoord, x)
@@ -649,7 +633,6 @@ draw_spawn_marker(id, Float:x, Float:y, Float:z, team) {
     write_byte(0)
     message_end()
 
-    // Circle
     message_begin(MSG_ONE, SVC_TEMPENTITY, _, id)
     write_byte(TE_BEAMCYLINDER)
     engfunc(EngFunc_WriteCoord, x)
