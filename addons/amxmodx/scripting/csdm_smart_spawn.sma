@@ -56,6 +56,9 @@ public plugin_init() {
     RegisterHookChain(RG_CSGameRules_RestartRound, "RestartRound_Post", true);
     RegisterHookChain(RG_CBasePlayer_Spawn, "Player_Spawn_Post", true);
 
+    // Дополнительный хук для надежности
+    RegisterHookChain(RG_CBasePlayer_Spawn, "Player_Spawn_Pre", false);
+
     // Команды
     register_concmd("csdm_addspawn", "CmdAddSpawn", ADMIN_MAP, "- Добавить точку спавна");
     register_concmd("csdm_delspawn", "CmdDelSpawn", ADMIN_MAP, "- Удалить ближайшую точку спавна");
@@ -82,6 +85,18 @@ public RestartRound_Post() {
     }
 }
 
+public Player_Spawn_Pre(id) {
+    if(!is_user_alive(id) || !get_pcvar_num(g_pCvarEnabled))
+        return HC_CONTINUE;
+
+    if(g_iSpawnCount == 0)
+        return HC_CONTINUE;
+
+    server_print("[CSDM DEBUG] Pre-spawn для игрока %d", id);
+
+    return HC_CONTINUE;
+}
+
 public Player_Spawn_Post(id) {
     if(!is_user_alive(id) || !get_pcvar_num(g_pCvarEnabled))
         return HC_CONTINUE;
@@ -91,18 +106,31 @@ public Player_Spawn_Post(id) {
         return HC_CONTINUE;
     }
 
-    // Небольшая задержка для корректного спавна
-    set_task(0.1, "TaskRespawnPlayer", id);
+    server_print("[CSDM DEBUG] Post-spawn для игрока %d, запуск телепортации", id);
+
+    // Несколько попыток телепортации для надежности
+    set_task(0.05, "TaskRespawnPlayer", id);
+    set_task(0.15, "TaskRespawnPlayer", id + 100);
+    set_task(0.3, "TaskRespawnPlayer", id + 200);
 
     return HC_CONTINUE;
 }
 
-public TaskRespawnPlayer(id) {
-    // Удаляем предыдущую задачу если есть
-    remove_task(id);
+public TaskRespawnPlayer(taskId) {
+    // Извлекаем реальный ID игрока
+    new id = taskId;
+    if(taskId > 100) {
+        id = taskId - 100;
+    }
+    if(taskId > 200) {
+        id = taskId - 200;
+    }
+    if(id > 100) {
+        id = id - 100;
+    }
 
-    if(!is_user_alive(id)) {
-        server_print("[CSDM DEBUG] Игрок %d не жив при телепортации", id);
+    if(!is_user_connected(id) || !is_user_alive(id)) {
+        server_print("[CSDM DEBUG] Игрок %d не жив при телепортации (taskId=%d)", id, taskId);
         return;
     }
 
@@ -122,6 +150,16 @@ public TaskRespawnPlayer(id) {
         new Float:zero[3] = {0.0, 0.0, 0.0};
         set_entvar(id, var_velocity, zero);
         set_entvar(id, var_basevelocity, zero);
+
+        // Проверяем что телепортация сработала
+        new Float:currentOrigin[3];
+        get_entvar(id, var_origin, currentOrigin);
+        new Float:distance = vector_distance(vOrigin, currentOrigin);
+        if(distance > 50.0) {
+            server_print("[CSDM DEBUG] ВНИМАНИЕ! Игрок %d не на месте! Расстояние: %.1f", id, distance);
+        } else {
+            server_print("[CSDM DEBUG] Успешная телепортация игрока %d (расстояние: %.1f)", id, distance);
+        }
     } else {
         server_print("[CSDM DEBUG] Не удалось найти точку спавна для игрока %d", id);
     }
