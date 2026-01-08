@@ -439,20 +439,30 @@ SaveSpawnsForMap() {
     new configDir[128];
     get_localinfo("amxx_configsdir", configDir, charsmax(configDir));
 
-    new filePath[256];
-    formatex(filePath, charsmax(filePath), "%s/csdm_spawns/%s.spawns", configDir, mapName);
-
     // Создаем директорию если не существует
     new dir[256];
     formatex(dir, charsmax(dir), "%s/csdm_spawns", configDir);
 
     if(!dir_exists(dir)) {
-        mkdir(dir);
+        if(!mkdir(dir)) {
+            server_print("[CSDM] Не удалось создать директорию: %s", dir);
+            server_print("[CSDM] Попытка создать в текущей директории...");
+
+            // Пробуем альтернативный путь
+            formatex(dir, charsmax(dir), "csdm_spawns");
+            if(!dir_exists(dir)) {
+                mkdir(dir);
+            }
+        }
     }
+
+    new filePath[256];
+    formatex(filePath, charsmax(filePath), "%s/%s.spawns", dir, mapName);
 
     new file = fopen(filePath, "wt");
     if(!file) {
         server_print("[CSDM] Ошибка создания файла: %s", filePath);
+        server_print("[CSDM] Проверьте права доступа к директории");
         return;
     }
 
@@ -485,7 +495,17 @@ LoadSpawnsForMap() {
     get_localinfo("amxx_configsdir", configDir, charsmax(configDir));
 
     new filePath[256];
-    formatex(filePath, charsmax(filePath), "%s/csdm_spawns/%s.spawns", configDir, mapName);
+    new dir[256];
+
+    // Пробуем основной путь
+    formatex(dir, charsmax(dir), "%s/csdm_spawns", configDir);
+    formatex(filePath, charsmax(filePath), "%s/%s.spawns", dir, mapName);
+
+    // Если не найден - пробуем альтернативный путь
+    if(!file_exists(filePath)) {
+        formatex(dir, charsmax(dir), "csdm_spawns");
+        formatex(filePath, charsmax(filePath), "%s/%s.spawns", dir, mapName);
+    }
 
     if(!file_exists(filePath)) {
         server_print("[CSDM] Файл спавнов не найден: %s", filePath);
