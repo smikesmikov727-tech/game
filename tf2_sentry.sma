@@ -1258,41 +1258,14 @@ ShootTarget(iEnt, iTarget, iLevel)
     entity_get_vector(iEnt, EV_VEC_origin, flOrigin)
     pev(iTarget, pev_origin, flTargetPos)
 
-    // Угол дула = угол базы + угол головы
-    new Float:flMuzzleAngle = GetMuzzleDirection(iEnt)
+    // Центр тела врага
+    flTargetPos[2] += 17.0
 
-    // Определяем позицию дула в зависимости от уровня
+    // Позиция дула - просто немного выше центра пушки
     new Float:flMuzzle[3]
-    new iBarrel = entity_get_int(iEnt, SENTRY_BARREL)
-
-    // Направление вперёд и вправо для расчёта позиции дула
-    new Float:flForwardX = floatcos(flMuzzleAngle, degrees)
-    new Float:flForwardY = floatsin(flMuzzleAngle, degrees)
-    new Float:flRightX = floatcos(flMuzzleAngle - 90.0, degrees)
-    new Float:flRightY = floatsin(flMuzzleAngle - 90.0, degrees)
-
-    if (iLevel == LEVEL_1)
-    {
-        // Level 1 - один ствол по центру, дальше вперёд
-        flMuzzle[0] = flOrigin[0] + flForwardX * 40.0
-        flMuzzle[1] = flOrigin[1] + flForwardY * 40.0
-        flMuzzle[2] = flOrigin[2] + 32.0
-    }
-    else
-    {
-        // Level 2 и 3 - два ствола по бокам, чередуем
-        new Float:flSideOffset = (iBarrel == 0) ? 12.0 : -12.0
-
-        flMuzzle[0] = flOrigin[0] + flForwardX * 45.0 + flRightX * flSideOffset
-        flMuzzle[1] = flOrigin[1] + flForwardY * 45.0 + flRightY * flSideOffset
-        flMuzzle[2] = flOrigin[2] + 35.0
-
-        // Чередуем стволы
-        entity_set_int(iEnt, SENTRY_BARREL, (iBarrel + 1) % 2)
-    }
-
-    // Целимся ТОЧНО в центр тела врага (без разброса!)
-    flTargetPos[2] += 15.0  // Центр тела
+    flMuzzle[0] = flOrigin[0]
+    flMuzzle[1] = flOrigin[1]
+    flMuzzle[2] = flOrigin[2] + 35.0  // Высота дула
 
     // TraceLine от дула к цели
     new tr = create_tr2()
@@ -1303,7 +1276,7 @@ ShootTarget(iEnt, iTarget, iLevel)
     new iHit = get_tr2(tr, TR_pHit)
     free_tr2(tr)
 
-    // Жёлтый луч (TE_BEAMPOINTS) - из дула к точке попадания
+    // Жёлтый луч (TE_BEAMPOINTS) - от пушки к точке попадания
     message_begin(MSG_BROADCAST, SVC_TEMPENTITY)
     write_byte(TE_BEAMPOINTS)
     write_coord(floatround(flMuzzle[0]))
@@ -1312,7 +1285,7 @@ ShootTarget(iEnt, iTarget, iLevel)
     write_coord(floatround(flEndPos[0]))
     write_coord(floatround(flEndPos[1]))
     write_coord(floatround(flEndPos[2]))
-    write_short(g_iSprLaser)  // laserbeam.spr
+    write_short(g_iSprLaser)
     write_byte(0)   // start frame
     write_byte(0)   // framerate
     write_byte(1)   // life
@@ -1326,18 +1299,7 @@ ShootTarget(iEnt, iTarget, iLevel)
     message_end()
 
     // Анимация стрельбы
-    if (iLevel == LEVEL_1)
-    {
-        set_entity_anim(iEnt, ANIM_FIRE, 1.0)
-    }
-    else
-    {
-        // Для level 2/3 чередуем fire и fire_alt
-        if (iBarrel == 0)
-            set_entity_anim(iEnt, ANIM_FIRE, 1.0)
-        else
-            set_entity_anim(iEnt, ANIM_FIRE_ALT, 1.0)
-    }
+    set_entity_anim(iEnt, ANIM_FIRE, 1.0)
 
     // Урон если попали в игрока
     if (iHit > 0 && iHit <= 32 && is_user_alive(iHit))
