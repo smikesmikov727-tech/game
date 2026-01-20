@@ -964,34 +964,23 @@ public fw_SentryThink(iEnt)
         // Нет цели - сбрасываем
         entity_set_edict(iEnt, SENTRY_TARGET, 0)
 
-        // ГОЛОВА сканирует через bone controller (база НЕ крутится!)
-        new Float:flHeadYaw = entity_get_float(iEnt, SENTRY_HEADYAW)
-        new Float:flScanDir = entity_get_float(iEnt, SENTRY_SCANDIR)
+        // Сканирование - КРУТИМ ВСЮ ПУШКУ по кругу 360°
+        new Float:flAngles[3]
+        entity_get_vector(iEnt, EV_VEC_angles, flAngles)
 
-        flHeadYaw += SCAN_SPEED * flScanDir  // Скорость сканирования
+        flAngles[1] += SCAN_SPEED  // Крутим по часовой
+        if (flAngles[1] > 360.0) flAngles[1] -= 360.0
+        if (flAngles[1] < 0.0) flAngles[1] += 360.0
 
-        // Границы ±90° (180° всего)
-        if (flHeadYaw > SCAN_ANGLE)
-        {
-            flHeadYaw = SCAN_ANGLE
-            entity_set_float(iEnt, SENTRY_SCANDIR, -1.0)
-        }
-        else if (flHeadYaw < -SCAN_ANGLE)
-        {
-            flHeadYaw = -SCAN_ANGLE
-            entity_set_float(iEnt, SENTRY_SCANDIR, 1.0)
-        }
+        entity_set_vector(iEnt, EV_VEC_angles, flAngles)
 
-        entity_set_float(iEnt, SENTRY_HEADYAW, flHeadYaw)
+        // Обновляем базовый угол для стрельбы
+        entity_set_float(iEnt, SENTRY_BASEANGLE, flAngles[1])
+        entity_set_float(iEnt, SENTRY_HEADYAW, 0.0)  // Голова в центре
 
-        // Применяем bone controller
-        // controller2 управляет YAW головы: 0-255, где 128 = центр
-        // Диапазон модели примерно ±180°, но ограничиваем до ±90°
-        new iYawCtrl = floatround(128.0 + (flHeadYaw / 180.0) * 127.0)
-        if (iYawCtrl < 0) iYawCtrl = 0
-        if (iYawCtrl > 255) iYawCtrl = 255
-        entity_set_byte(iEnt, EV_BYTE_controller2, iYawCtrl)
-        entity_set_byte(iEnt, EV_BYTE_controller1, 128)  // Pitch в центре
+        // Bone controllers в центр
+        entity_set_byte(iEnt, EV_BYTE_controller1, 128)
+        entity_set_byte(iEnt, EV_BYTE_controller2, 128)
 
         // Анимация idle
         set_entity_anim(iEnt, ANIM_IDLE, 1.0)
@@ -1185,7 +1174,7 @@ FindTarget(iEnt, iTeam)
     return iBest
 }
 
-// Поворот ГОЛОВЫ к цели через bone controller
+// Поворот ВСЕЙ ПУШКИ к цели
 TrackTarget(iEnt, iTarget)
 {
     new Float:flOrigin[3], Float:flTargetPos[3]
@@ -1202,64 +1191,48 @@ TrackTarget(iEnt, iTarget)
     flDir[2] = flTargetPos[2] - flOrigin[2]
 
     // Угол к цели в мировых координатах
-    new Float:flTargetWorldYaw = floatatan2(flDir[1], flDir[0], degrees)
+    new Float:flTargetYaw = floatatan2(flDir[1], flDir[0], degrees)
 
-    // Базовый угол пушки + смещение модели = реальное направление "вперёд" модели
-    new Float:flBaseAngle = entity_get_float(iEnt, SENTRY_BASEANGLE)
-    new Float:flModelForward = flBaseAngle + MODEL_YAW_OFFSET
+    // Учитываем смещение модели - дула смотрят на MODEL_YAW_OFFSET от angles[1]
+    // Значит angles[1] должен быть = flTargetYaw - MODEL_YAW_OFFSET
+    new Float:flNeededAngle = flTargetYaw - MODEL_YAW_OFFSET
 
-    // Угол головы относительно направления модели
-    new Float:flTargetHeadYaw = flTargetWorldYaw - flModelForward
+    // Нормализуем
+    while (flNeededAngle > 180.0) flNeededAngle -= 360.0
+    while (flNeededAngle < -180.0) flNeededAngle += 360.0
 
-    // Нормализуем -180..+180
-    while (flTargetHeadYaw > 180.0) flTargetHeadYaw -= 360.0
-    while (flTargetHeadYaw < -180.0) flTargetHeadYaw += 360.0
-
-    // Текущий угол головы
-    new Float:flHeadYaw = entity_get_float(iEnt, SENTRY_HEADYAW)
+    // Текущий угол пушки
+    new Float:flAngles[3]
+    entity_get_vector(iEnt, EV_VEC_angles, flAngles)
+    new Float:flCurrentYaw = flAngles[1]
 
     // Вычисляем кратчайший путь поворота
-    new Float:flDiff = flTargetHeadYaw - flHeadYaw
+    new Float:flDiff = flNeededAngle - flCurrentYaw
     while (flDiff > 180.0) flDiff -= 360.0
     while (flDiff < -180.0) flDiff += 360.0
 
-    // Плавный поворот головы к цели
-    new Float:flHeadSpeed = TURN_SPEED
-
-    if (floatabs(flDiff) <= flHeadSpeed)
-        flHeadYaw = flTargetHeadYaw
+    // Плавный поворот к цели
+    if (floatabs(flDiff) <= TURN_SPEED)
+        flAngles[1] = flNeededAngle
     else if (flDiff > 0.0)
-        flHeadYaw += flHeadSpeed
+        flAngles[1] += TURN_SPEED
     else
-        flHeadYaw -= flHeadSpeed
+        flAngles[1] -= TURN_SPEED
 
-    // Нормализуем результат
-    while (flHeadYaw > 180.0) flHeadYaw -= 360.0
-    while (flHeadYaw < -180.0) flHeadYaw += 360.0
+    // Нормализуем
+    while (flAngles[1] > 180.0) flAngles[1] -= 360.0
+    while (flAngles[1] < -180.0) flAngles[1] += 360.0
 
-    entity_set_float(iEnt, SENTRY_HEADYAW, flHeadYaw)
+    // Применяем угол к пушке
+    entity_set_vector(iEnt, EV_VEC_angles, flAngles)
 
-    // Применяем YAW через bone controller
-    // Диапазон: -180..+180 -> 0..255, где 128 = центр
-    new iYawCtrl = floatround(128.0 + (flHeadYaw / 180.0) * 127.0)
-    if (iYawCtrl < 0) iYawCtrl = 0
-    if (iYawCtrl > 255) iYawCtrl = 255
-    entity_set_byte(iEnt, EV_BYTE_controller2, iYawCtrl)
+    // Обновляем базовый угол для стрельбы
+    entity_set_float(iEnt, SENTRY_BASEANGLE, flAngles[1])
+    entity_set_float(iEnt, SENTRY_HEADYAW, 0.0)
 
-    // PITCH - наклон к цели
-    new Float:flDistXY = floatsqroot(flDir[0]*flDir[0] + flDir[1]*flDir[1])
-    new Float:flPitch = 0.0
-    if (flDistXY > 10.0)
-    {
-        flPitch = -floatatan2(flDir[2], flDistXY, degrees)
-        if (flPitch > 50.0) flPitch = 50.0
-        if (flPitch < -50.0) flPitch = -50.0
-    }
-
-    new iPitchCtrl = floatround(128.0 + (flPitch / 50.0) * 64.0)
-    if (iPitchCtrl < 0) iPitchCtrl = 0
-    if (iPitchCtrl > 255) iPitchCtrl = 255
-    entity_set_byte(iEnt, EV_BYTE_controller1, iPitchCtrl)
+    // Bone controllers в центр (вся пушка уже повёрнута)
+    entity_set_byte(iEnt, EV_BYTE_controller1, 128)
+    entity_set_byte(iEnt, EV_BYTE_controller2, 128)
 }
 
 // Получить реальное направление дула (база + голова + смещение модели)
@@ -1300,19 +1273,19 @@ ShootTarget(iEnt, iTarget, iLevel)
 
     if (iLevel == LEVEL_1)
     {
-        // Level 1 - один ствол по центру
-        flMuzzle[0] = flOrigin[0] + flForwardX * 25.0
-        flMuzzle[1] = flOrigin[1] + flForwardY * 25.0
-        flMuzzle[2] = flOrigin[2] + 28.0
+        // Level 1 - один ствол по центру, дальше вперёд
+        flMuzzle[0] = flOrigin[0] + flForwardX * 40.0
+        flMuzzle[1] = flOrigin[1] + flForwardY * 40.0
+        flMuzzle[2] = flOrigin[2] + 32.0
     }
     else
     {
         // Level 2 и 3 - два ствола по бокам, чередуем
-        new Float:flSideOffset = (iBarrel == 0) ? 8.0 : -8.0
+        new Float:flSideOffset = (iBarrel == 0) ? 12.0 : -12.0
 
-        flMuzzle[0] = flOrigin[0] + flForwardX * 30.0 + flRightX * flSideOffset
-        flMuzzle[1] = flOrigin[1] + flForwardY * 30.0 + flRightY * flSideOffset
-        flMuzzle[2] = flOrigin[2] + 32.0
+        flMuzzle[0] = flOrigin[0] + flForwardX * 45.0 + flRightX * flSideOffset
+        flMuzzle[1] = flOrigin[1] + flForwardY * 45.0 + flRightY * flSideOffset
+        flMuzzle[2] = flOrigin[2] + 35.0
 
         // Чередуем стволы
         entity_set_int(iEnt, SENTRY_BARREL, (iBarrel + 1) % 2)
