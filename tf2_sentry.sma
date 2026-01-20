@@ -1267,13 +1267,13 @@ TrackTarget(iEnt, iTarget)
 }
 
 // Получить реальное направление дула (база + голова)
-GetMuzzleDirection(iEnt, Float:flMuzzleAngle)
+Float:GetMuzzleDirection(iEnt)
 {
     new Float:flBaseAngle = entity_get_float(iEnt, SENTRY_BASEANGLE)
     new Float:flHeadYaw = entity_get_float(iEnt, SENTRY_HEADYAW)
 
     // Направление дула = угол базы + угол головы
-    flMuzzleAngle = flBaseAngle + flHeadYaw
+    new Float:flMuzzleAngle = flBaseAngle + flHeadYaw
 
     // Нормализуем
     while (flMuzzleAngle > 180.0) flMuzzleAngle -= 360.0
@@ -1290,8 +1290,7 @@ ShootTarget(iEnt, iTarget, iLevel)
     pev(iTarget, pev_origin, flTargetPos)
 
     // Угол дула = угол базы + угол головы
-    new Float:flMuzzleAngle
-    GetMuzzleDirection(iEnt, flMuzzleAngle)
+    new Float:flMuzzleAngle = GetMuzzleDirection(iEnt)
 
     // Определяем позицию дула в зависимости от уровня
     new Float:flMuzzle[3]
@@ -1421,8 +1420,7 @@ FireRocket(iEnt, iTarget)
     pev(iTarget, pev_origin, flTargetOrigin)
 
     // Угол дула
-    new Float:flMuzzleAngle
-    GetMuzzleDirection(iEnt, flMuzzleAngle)
+    new Float:flMuzzleAngle = GetMuzzleDirection(iEnt)
 
     // Направление
     new Float:flForwardX = floatcos(flMuzzleAngle, degrees)
