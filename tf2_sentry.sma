@@ -966,13 +966,13 @@ public fw_SentryThink(iEnt)
 
         // Сканирование - КРУТИМ ВСЮ ПУШКУ по кругу 360°
         new Float:flAngles[3]
-        entity_get_vector(iEnt, EV_VEC_angles, flAngles)
+        pev(iEnt, pev_angles, flAngles)
 
         flAngles[1] += SCAN_SPEED  // Крутим по часовой
         if (flAngles[1] > 360.0) flAngles[1] -= 360.0
         if (flAngles[1] < 0.0) flAngles[1] += 360.0
 
-        entity_set_vector(iEnt, EV_VEC_angles, flAngles)
+        set_pev(iEnt, pev_angles, flAngles)
 
         // Обновляем базовый угол для стрельбы
         entity_set_float(iEnt, SENTRY_BASEANGLE, flAngles[1])
@@ -1026,7 +1026,7 @@ FinishBuilding(iEnt)
     new Float:flMaxs[3] = {20.0, 20.0, 55.0}
     entity_set_size(iEnt, flMins, flMaxs)
     entity_set_int(iEnt, EV_INT_solid, SOLID_SLIDEBOX)
-    entity_set_int(iEnt, EV_INT_movetype, MOVETYPE_TOSS)  // TOSS лучше для статичных объектов
+    entity_set_int(iEnt, EV_INT_movetype, MOVETYPE_NONE)  // NONE для свободного вращения
 
     // Рендер - полностью непрозрачная
     entity_set_int(iEnt, EV_INT_rendermode, 0)
@@ -1092,7 +1092,7 @@ FinishUpgrade(iEnt)
     new Float:flMaxs[3] = {20.0, 20.0, 55.0}
     entity_set_size(iEnt, flMins, flMaxs)
     entity_set_int(iEnt, EV_INT_solid, SOLID_SLIDEBOX)
-    entity_set_int(iEnt, EV_INT_movetype, MOVETYPE_TOSS)
+    entity_set_int(iEnt, EV_INT_movetype, MOVETYPE_NONE)  // NONE для свободного вращения
 
     // Рендер - полностью непрозрачная
     entity_set_int(iEnt, EV_INT_rendermode, 0)
@@ -1189,18 +1189,23 @@ TrackTarget(iEnt, iTarget)
     // Угол к цели
     new Float:flTargetYaw = floatatan2(flDir[1], flDir[0], degrees)
 
-    // Корректируем на смещение модели
-    new Float:flAngles[3]
-    flAngles[0] = 0.0
-    flAngles[1] = flTargetYaw + 90.0  // +90 потому что модель смотрит вбок
-    flAngles[2] = 0.0
+    // Корректируем на смещение модели (+90 потому что дула смотрят вбок)
+    flTargetYaw += 90.0
 
     // Нормализуем
-    while (flAngles[1] > 180.0) flAngles[1] -= 360.0
-    while (flAngles[1] < -180.0) flAngles[1] += 360.0
+    while (flTargetYaw > 180.0) flTargetYaw -= 360.0
+    while (flTargetYaw < -180.0) flTargetYaw += 360.0
 
-    // Применяем угол к пушке МГНОВЕННО
-    entity_set_vector(iEnt, EV_VEC_angles, flAngles)
+    // Применяем угол к пушке через set_pev (более надёжно)
+    new Float:flAngles[3]
+    flAngles[0] = 0.0
+    flAngles[1] = flTargetYaw
+    flAngles[2] = 0.0
+
+    set_pev(iEnt, pev_angles, flAngles)
+
+    // Также обновляем v_angle для надёжности
+    set_pev(iEnt, pev_v_angle, flAngles)
 }
 
 // Получить реальное направление дула (база + голова + смещение модели)
