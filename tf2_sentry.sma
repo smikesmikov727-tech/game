@@ -1174,65 +1174,33 @@ FindTarget(iEnt, iTeam)
     return iBest
 }
 
-// Поворот ВСЕЙ ПУШКИ к цели
+// Поворот ВСЕЙ ПУШКИ к цели - МГНОВЕННО
 TrackTarget(iEnt, iTarget)
 {
     new Float:flOrigin[3], Float:flTargetPos[3]
     entity_get_vector(iEnt, EV_VEC_origin, flOrigin)
     pev(iTarget, pev_origin, flTargetPos)
 
-    flOrigin[2] += 30.0  // Центр пушки
-    flTargetPos[2] += 17.0  // Центр тела врага
-
     // Направление к цели
     new Float:flDir[3]
     flDir[0] = flTargetPos[0] - flOrigin[0]
     flDir[1] = flTargetPos[1] - flOrigin[1]
-    flDir[2] = flTargetPos[2] - flOrigin[2]
 
-    // Угол к цели в мировых координатах
+    // Угол к цели
     new Float:flTargetYaw = floatatan2(flDir[1], flDir[0], degrees)
 
-    // Учитываем смещение модели - дула смотрят на MODEL_YAW_OFFSET от angles[1]
-    // Значит angles[1] должен быть = flTargetYaw - MODEL_YAW_OFFSET
-    new Float:flNeededAngle = flTargetYaw - MODEL_YAW_OFFSET
-
-    // Нормализуем
-    while (flNeededAngle > 180.0) flNeededAngle -= 360.0
-    while (flNeededAngle < -180.0) flNeededAngle += 360.0
-
-    // Текущий угол пушки
+    // Корректируем на смещение модели
     new Float:flAngles[3]
-    entity_get_vector(iEnt, EV_VEC_angles, flAngles)
-    new Float:flCurrentYaw = flAngles[1]
-
-    // Вычисляем кратчайший путь поворота
-    new Float:flDiff = flNeededAngle - flCurrentYaw
-    while (flDiff > 180.0) flDiff -= 360.0
-    while (flDiff < -180.0) flDiff += 360.0
-
-    // Плавный поворот к цели
-    if (floatabs(flDiff) <= TURN_SPEED)
-        flAngles[1] = flNeededAngle
-    else if (flDiff > 0.0)
-        flAngles[1] += TURN_SPEED
-    else
-        flAngles[1] -= TURN_SPEED
+    flAngles[0] = 0.0
+    flAngles[1] = flTargetYaw + 90.0  // +90 потому что модель смотрит вбок
+    flAngles[2] = 0.0
 
     // Нормализуем
     while (flAngles[1] > 180.0) flAngles[1] -= 360.0
     while (flAngles[1] < -180.0) flAngles[1] += 360.0
 
-    // Применяем угол к пушке
+    // Применяем угол к пушке МГНОВЕННО
     entity_set_vector(iEnt, EV_VEC_angles, flAngles)
-
-    // Обновляем базовый угол для стрельбы
-    entity_set_float(iEnt, SENTRY_BASEANGLE, flAngles[1])
-    entity_set_float(iEnt, SENTRY_HEADYAW, 0.0)
-
-    // Bone controllers в центр (вся пушка уже повёрнута)
-    entity_set_byte(iEnt, EV_BYTE_controller1, 128)
-    entity_set_byte(iEnt, EV_BYTE_controller2, 128)
 }
 
 // Получить реальное направление дула (база + голова + смещение модели)
