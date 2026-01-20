@@ -115,8 +115,8 @@
 #define SCAN_SPEED          2.0     // Скорость сканирования (градусы за тик)
 #define SCAN_ANGLE          90.0    // Угол сканирования ±90° (180° всего)
 
-// Смещение модели - TF2 модель смотрит на +90° от angles[1]
-#define MODEL_YAW_OFFSET    90.0
+// Смещение модели - TF2 модель смотрит на -90° от angles[1]
+#define MODEL_YAW_OFFSET    -90.0
 
 // Здоровье по уровням (из TF2 Wiki)
 new const Float:g_flHealth[4] = {0.0, 150.0, 180.0, 216.0}
