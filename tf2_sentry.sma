@@ -1134,55 +1134,42 @@ FindTarget(iEnt, iTeam)
 {
     new Float:flOrigin[3]
     entity_get_vector(iEnt, EV_VEC_origin, flOrigin)
-    flOrigin[2] += 25.0
-
-    new Float:flBaseAngle = entity_get_float(iEnt, SENTRY_BASEANGLE)
+    flOrigin[2] += 30.0  // Высота глаз пушки
 
     new Float:flRange = DETECT_RANGE
     new Float:flMinDist = flRange + 1.0
     new iBest = 0
 
-    for (new i = 1; i <= 32; i++)
+    for (new i = 1; i <= g_iMaxPlayers; i++)
     {
         if (!is_user_alive(i))
             continue
+
+        // Пропускаем союзников (та же команда)
         if (get_user_team(i) == iTeam)
             continue
 
         new Float:flTargetPos[3]
         pev(i, pev_origin, flTargetPos)
+        flTargetPos[2] += 17.0  // Центр тела игрока
 
         new Float:flDist = get_distance_f(flOrigin, flTargetPos)
         if (flDist > flRange)
             continue
 
-        // Проверяем угол к цели (180° зона обзора)
-        new Float:flDir[3]
-        flDir[0] = flTargetPos[0] - flOrigin[0]
-        flDir[1] = flTargetPos[1] - flOrigin[1]
-
-        new Float:flTargetAngle = floatatan2(flDir[1], flDir[0], degrees)
-        new Float:flAngleDiff = flTargetAngle - flBaseAngle
-
-        // Нормализуем угол
-        while (flAngleDiff > 180.0) flAngleDiff -= 360.0
-        while (flAngleDiff < -180.0) flAngleDiff += 360.0
-
-        // Проверяем что цель в зоне обзора ±90° (180° всего)
-        if (floatabs(flAngleDiff) > 90.0)
-            continue
-
-        // Проверка видимости
+        // Проверка видимости - трассируем к игроку
         new tr = create_tr2()
-        engfunc(EngFunc_TraceLine, flOrigin, flTargetPos, IGNORE_MONSTERS, iEnt, tr)
+        engfunc(EngFunc_TraceLine, flOrigin, flTargetPos, DONT_IGNORE_MONSTERS, iEnt, tr)
 
         new Float:flFrac
         get_tr2(tr, TR_flFraction, flFrac)
         new iHit = get_tr2(tr, TR_pHit)
         free_tr2(tr)
 
-        // Не видим если луч не дошёл И не попали в игрока
-        if (flFrac < 1.0 && iHit != i)
+        // Видим если: луч дошёл полностью ИЛИ попали в этого игрока
+        new bool:bVisible = (flFrac >= 1.0) || (iHit == i)
+
+        if (!bVisible)
             continue
 
         if (flDist < flMinDist)
@@ -1195,14 +1182,15 @@ FindTarget(iEnt, iTeam)
     return iBest
 }
 
-// Поворот ГОЛОВЫ к цели через bone controller (база ПОЛНОСТЬЮ статична!)
+// Поворот ГОЛОВЫ к цели через bone controller
 TrackTarget(iEnt, iTarget)
 {
     new Float:flOrigin[3], Float:flTargetPos[3]
     entity_get_vector(iEnt, EV_VEC_origin, flOrigin)
     pev(iTarget, pev_origin, flTargetPos)
 
-    flOrigin[2] += 25.0  // Центр пушки
+    flOrigin[2] += 30.0  // Центр пушки
+    flTargetPos[2] += 17.0  // Центр тела врага
 
     // Направление к цели
     new Float:flDir[3]
@@ -1213,7 +1201,7 @@ TrackTarget(iEnt, iTarget)
     // Угол к цели в мировых координатах
     new Float:flTargetWorldYaw = floatatan2(flDir[1], flDir[0], degrees)
 
-    // Базовый угол (куда смотрит база - НЕ меняется!)
+    // Базовый угол пушки
     new Float:flBaseAngle = entity_get_float(iEnt, SENTRY_BASEANGLE)
 
     // Угол головы относительно базы
@@ -1223,15 +1211,15 @@ TrackTarget(iEnt, iTarget)
     while (flTargetHeadYaw > 180.0) flTargetHeadYaw -= 360.0
     while (flTargetHeadYaw < -180.0) flTargetHeadYaw += 360.0
 
-    // Ограничиваем диапазоном головы ±90° (180° зона обзора)
-    if (flTargetHeadYaw > 90.0) flTargetHeadYaw = 90.0
-    if (flTargetHeadYaw < -90.0) flTargetHeadYaw = -90.0
-
     // Текущий угол головы
     new Float:flHeadYaw = entity_get_float(iEnt, SENTRY_HEADYAW)
 
-    // Плавный поворот головы к цели
+    // Вычисляем кратчайший путь поворота
     new Float:flDiff = flTargetHeadYaw - flHeadYaw
+    while (flDiff > 180.0) flDiff -= 360.0
+    while (flDiff < -180.0) flDiff += 360.0
+
+    // Плавный поворот головы к цели
     new Float:flHeadSpeed = TURN_SPEED
 
     if (floatabs(flDiff) <= flHeadSpeed)
@@ -1240,6 +1228,10 @@ TrackTarget(iEnt, iTarget)
         flHeadYaw += flHeadSpeed
     else
         flHeadYaw -= flHeadSpeed
+
+    // Нормализуем результат
+    while (flHeadYaw > 180.0) flHeadYaw -= 360.0
+    while (flHeadYaw < -180.0) flHeadYaw += 360.0
 
     entity_set_float(iEnt, SENTRY_HEADYAW, flHeadYaw)
 
