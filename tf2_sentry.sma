@@ -964,23 +964,19 @@ public fw_SentryThink(iEnt)
         // Нет цели - сбрасываем
         entity_set_edict(iEnt, SENTRY_TARGET, 0)
 
-        // Сканирование - КРУТИМ ВСЮ ПУШКУ по кругу 360°
-        new Float:flAngles[3]
-        pev(iEnt, pev_angles, flAngles)
+        // Сканирование через Bone Controller - голова крутится по часовой
+        new Float:flHeadYaw = entity_get_float(iEnt, SENTRY_HEADYAW)
 
-        flAngles[1] += SCAN_SPEED  // Крутим по часовой
-        if (flAngles[1] > 360.0) flAngles[1] -= 360.0
-        if (flAngles[1] < 0.0) flAngles[1] += 360.0
+        flHeadYaw += SCAN_SPEED  // По часовой
+        if (flHeadYaw >= 360.0) flHeadYaw -= 360.0
 
-        set_pev(iEnt, pev_angles, flAngles)
+        entity_set_float(iEnt, SENTRY_HEADYAW, flHeadYaw)
 
-        // Обновляем базовый угол для стрельбы
-        entity_set_float(iEnt, SENTRY_BASEANGLE, flAngles[1])
-        entity_set_float(iEnt, SENTRY_HEADYAW, 0.0)  // Голова в центре
-
-        // Bone controllers в центр
-        entity_set_byte(iEnt, EV_BYTE_controller1, 128)
-        entity_set_byte(iEnt, EV_BYTE_controller2, 128)
+        // Применяем через bone controller (0-255 = 0-360 градусов)
+        new iController = floatround(flHeadYaw * (255.0 / 360.0))
+        if (iController > 255) iController = 255
+        if (iController < 0) iController = 0
+        entity_set_byte(iEnt, EV_BYTE_controller1, iController)
 
         // Анимация idle
         set_entity_anim(iEnt, ANIM_IDLE, 1.0)
@@ -1021,25 +1017,24 @@ FinishBuilding(iEnt)
     entity_set_vector(iEnt, EV_VEC_angles, flAngles)
     entity_set_int(iEnt, EV_INT_skin, iSkin)
 
-    // ВАЖНО: После entity_set_model нужно заново установить размеры и физику!
+    // Размеры и физика
     new Float:flMins[3] = {-20.0, -20.0, 0.0}
     new Float:flMaxs[3] = {20.0, 20.0, 55.0}
     entity_set_size(iEnt, flMins, flMaxs)
     entity_set_int(iEnt, EV_INT_solid, SOLID_SLIDEBOX)
-    entity_set_int(iEnt, EV_INT_movetype, MOVETYPE_NONE)  // NONE для свободного вращения
+    entity_set_int(iEnt, EV_INT_movetype, MOVETYPE_TOSS)
 
-    // Рендер - полностью непрозрачная
+    // Рендер
     entity_set_int(iEnt, EV_INT_rendermode, 0)
     entity_set_int(iEnt, EV_INT_renderfx, 0)
     entity_set_float(iEnt, EV_FL_renderamt, 255.0)
 
     entity_set_int(iEnt, SENTRY_STATE, STATE_IDLE)
 
-    // Инициализируем сканирование
+    // Инициализируем bone controller для сканирования
     entity_set_float(iEnt, SENTRY_HEADYAW, 0.0)
     entity_set_float(iEnt, SENTRY_SCANPAUSE, 0.0)
-    entity_set_float(iEnt, SENTRY_SCANDIR, 1.0)
-    entity_set_byte(iEnt, EV_BYTE_controller1, 128)
+    entity_set_byte(iEnt, EV_BYTE_controller1, 0)
     entity_set_byte(iEnt, EV_BYTE_controller2, 128)
 
     // Анимация idle
@@ -1087,25 +1082,24 @@ FinishUpgrade(iEnt)
     entity_set_vector(iEnt, EV_VEC_angles, flAngles)
     entity_set_int(iEnt, EV_INT_skin, iSkin)
 
-    // ВАЖНО: После entity_set_model нужно заново установить размеры и физику!
+    // Размеры и физика
     new Float:flMins[3] = {-20.0, -20.0, 0.0}
     new Float:flMaxs[3] = {20.0, 20.0, 55.0}
     entity_set_size(iEnt, flMins, flMaxs)
     entity_set_int(iEnt, EV_INT_solid, SOLID_SLIDEBOX)
-    entity_set_int(iEnt, EV_INT_movetype, MOVETYPE_NONE)  // NONE для свободного вращения
+    entity_set_int(iEnt, EV_INT_movetype, MOVETYPE_TOSS)
 
-    // Рендер - полностью непрозрачная
+    // Рендер
     entity_set_int(iEnt, EV_INT_rendermode, 0)
     entity_set_int(iEnt, EV_INT_renderfx, 0)
     entity_set_float(iEnt, EV_FL_renderamt, 255.0)
 
     entity_set_int(iEnt, SENTRY_STATE, STATE_IDLE)
 
-    // Инициализируем сканирование
+    // Инициализируем bone controller
     entity_set_float(iEnt, SENTRY_HEADYAW, 0.0)
     entity_set_float(iEnt, SENTRY_SCANPAUSE, 0.0)
-    entity_set_float(iEnt, SENTRY_SCANDIR, 1.0)
-    entity_set_byte(iEnt, EV_BYTE_controller1, 128)
+    entity_set_byte(iEnt, EV_BYTE_controller1, 0)
     entity_set_byte(iEnt, EV_BYTE_controller2, 128)
 
     // Анимация idle
@@ -1174,7 +1168,7 @@ FindTarget(iEnt, iTeam)
     return iBest
 }
 
-// Поворот ВСЕЙ ПУШКИ к цели - МГНОВЕННО
+// Поворот ГОЛОВЫ к цели через Bone Controller
 TrackTarget(iEnt, iTarget)
 {
     new Float:flOrigin[3], Float:flTargetPos[3]
@@ -1186,26 +1180,27 @@ TrackTarget(iEnt, iTarget)
     flDir[0] = flTargetPos[0] - flOrigin[0]
     flDir[1] = flTargetPos[1] - flOrigin[1]
 
-    // Угол к цели
-    new Float:flTargetYaw = floatatan2(flDir[1], flDir[0], degrees)
+    // Угол к цели (мировой)
+    new Float:flWorldYaw = floatatan2(flDir[1], flDir[0], degrees)
 
-    // Корректируем на смещение модели (+90 потому что дула смотрят вбок)
-    flTargetYaw += 90.0
+    // Угол базы пушки
+    new Float:flBaseAngle = entity_get_float(iEnt, SENTRY_BASEANGLE)
 
-    // Нормализуем
-    while (flTargetYaw > 180.0) flTargetYaw -= 360.0
-    while (flTargetYaw < -180.0) flTargetYaw += 360.0
+    // Угол головы относительно базы + смещение модели
+    new Float:flHeadYaw = flWorldYaw - flBaseAngle + MODEL_YAW_OFFSET
 
-    // Применяем угол к пушке через set_pev (более надёжно)
-    new Float:flAngles[3]
-    flAngles[0] = 0.0
-    flAngles[1] = flTargetYaw
-    flAngles[2] = 0.0
+    // Нормализуем в 0-360
+    while (flHeadYaw < 0.0) flHeadYaw += 360.0
+    while (flHeadYaw >= 360.0) flHeadYaw -= 360.0
 
-    set_pev(iEnt, pev_angles, flAngles)
+    // Сохраняем
+    entity_set_float(iEnt, SENTRY_HEADYAW, flHeadYaw)
 
-    // Также обновляем v_angle для надёжности
-    set_pev(iEnt, pev_v_angle, flAngles)
+    // Применяем через bone controller (0-255 = 0-360 градусов)
+    new iController = floatround(flHeadYaw * (255.0 / 360.0))
+    if (iController > 255) iController = 255
+    if (iController < 0) iController = 0
+    entity_set_byte(iEnt, EV_BYTE_controller1, iController)
 }
 
 // Получить реальное направление дула (база + голова + смещение модели)
@@ -1224,7 +1219,7 @@ Float:GetMuzzleDirection(iEnt)
     return flMuzzleAngle
 }
 
-// Выстрел - трассер из дула, точно по врагу
+// Выстрел - трассер из дула к врагу
 ShootTarget(iEnt, iTarget, iLevel)
 {
     new Float:flOrigin[3], Float:flTargetPos[3]
@@ -1234,10 +1229,11 @@ ShootTarget(iEnt, iTarget, iLevel)
     // Центр тела врага
     flTargetPos[2] += 17.0
 
-    // Позиция дула - просто немного выше центра пушки
+    // Позиция дула - вычисляем по направлению головы
+    new Float:flMuzzleAngle = GetMuzzleDirection(iEnt)
     new Float:flMuzzle[3]
-    flMuzzle[0] = flOrigin[0]
-    flMuzzle[1] = flOrigin[1]
+    flMuzzle[0] = flOrigin[0] + floatcos(flMuzzleAngle, degrees) * 15.0
+    flMuzzle[1] = flOrigin[1] + floatsin(flMuzzleAngle, degrees) * 15.0
     flMuzzle[2] = flOrigin[2] + 35.0  // Высота дула
 
     // TraceLine от дула к цели
@@ -1249,7 +1245,7 @@ ShootTarget(iEnt, iTarget, iLevel)
     new iHit = get_tr2(tr, TR_pHit)
     free_tr2(tr)
 
-    // Жёлтый луч (TE_BEAMPOINTS) - от пушки к точке попадания
+    // Жёлтый луч (TE_BEAMPOINTS)
     message_begin(MSG_BROADCAST, SVC_TEMPENTITY)
     write_byte(TE_BEAMPOINTS)
     write_coord(floatround(flMuzzle[0]))
@@ -1803,11 +1799,3 @@ stock set_entity_anim(iEnt, iSequence, Float:flFrameRate)
     entity_set_float(iEnt, EV_FL_frame, 0.0)
 }
 
-stock fix_sentry_angles(iEnt)
-{
-    new Float:flAngles[3]
-    entity_get_vector(iEnt, EV_VEC_angles, flAngles)
-    flAngles[0] = 0.0   // pitch = 0
-    flAngles[2] = 0.0   // roll = 0
-    entity_set_vector(iEnt, EV_VEC_angles, flAngles)
-}
