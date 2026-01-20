@@ -115,6 +115,9 @@
 #define SCAN_SPEED          2.0     // Скорость сканирования (градусы за тик)
 #define SCAN_ANGLE          90.0    // Угол сканирования ±90° (180° всего)
 
+// Смещение модели - TF2 модель смотрит на +90° от angles[1]
+#define MODEL_YAW_OFFSET    90.0
+
 // Здоровье по уровням (из TF2 Wiki)
 new const Float:g_flHealth[4] = {0.0, 150.0, 180.0, 216.0}
 
@@ -1201,11 +1204,12 @@ TrackTarget(iEnt, iTarget)
     // Угол к цели в мировых координатах
     new Float:flTargetWorldYaw = floatatan2(flDir[1], flDir[0], degrees)
 
-    // Базовый угол пушки
+    // Базовый угол пушки + смещение модели = реальное направление "вперёд" модели
     new Float:flBaseAngle = entity_get_float(iEnt, SENTRY_BASEANGLE)
+    new Float:flModelForward = flBaseAngle + MODEL_YAW_OFFSET
 
-    // Угол головы относительно базы
-    new Float:flTargetHeadYaw = flTargetWorldYaw - flBaseAngle
+    // Угол головы относительно направления модели
+    new Float:flTargetHeadYaw = flTargetWorldYaw - flModelForward
 
     // Нормализуем -180..+180
     while (flTargetHeadYaw > 180.0) flTargetHeadYaw -= 360.0
@@ -1258,14 +1262,14 @@ TrackTarget(iEnt, iTarget)
     entity_set_byte(iEnt, EV_BYTE_controller1, iPitchCtrl)
 }
 
-// Получить реальное направление дула (база + голова)
+// Получить реальное направление дула (база + голова + смещение модели)
 Float:GetMuzzleDirection(iEnt)
 {
     new Float:flBaseAngle = entity_get_float(iEnt, SENTRY_BASEANGLE)
     new Float:flHeadYaw = entity_get_float(iEnt, SENTRY_HEADYAW)
 
-    // Направление дула = угол базы + угол головы
-    new Float:flMuzzleAngle = flBaseAngle + flHeadYaw
+    // Направление дула = угол базы + угол головы + смещение модели
+    new Float:flMuzzleAngle = flBaseAngle + flHeadYaw + MODEL_YAW_OFFSET
 
     // Нормализуем
     while (flMuzzleAngle > 180.0) flMuzzleAngle -= 360.0
